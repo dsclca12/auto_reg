@@ -28,8 +28,9 @@
 
 ### 环境要求
 
-- Python 3.11+
+- Python 3.12+
 - Node.js 18+
+- Conda（推荐）或 Python venv
 
 ### 安装
 
@@ -40,9 +41,9 @@
 git clone <repo_url>
 cd account_manager
 
-# 创建虚拟环境
-python3 -m venv .venv
-source .venv/bin/activate
+# 创建 conda 环境
+conda create -n any-auto-register python=3.12 -y
+conda activate any-auto-register
 
 # 安装后端依赖
 pip install -r requirements.txt
@@ -61,9 +62,9 @@ cd ..
 git clone <repo_url>
 cd account_manager
 
-:: 创建虚拟环境
-python -m venv .venv
-.venv\Scripts\activate
+:: 创建 conda 环境
+conda create -n any-auto-register python=3.12 -y
+conda activate any-auto-register
 
 :: 安装后端依赖
 pip install -r requirements.txt
@@ -87,16 +88,11 @@ python3 -m camoufox fetch
 
 ### 启动
 
-#### macOS / Linux
+确保已激活 conda 环境：
 
 ```bash
-.venv/bin/python3 -m uvicorn main:app --port 8000
-```
-
-#### Windows
-
-```bat
-.venv\Scripts\python -m uvicorn main:app --port 8000
+conda activate any-auto-register
+python -m uvicorn main:app --port 8000
 ```
 
 浏览器访问 `http://localhost:5173`
