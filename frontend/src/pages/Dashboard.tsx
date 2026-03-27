@@ -36,14 +36,14 @@ export default function Dashboard() {
   useEffect(() => { load() }, [])
 
   const statCards = [
-    { label: '总账号数', value: stats?.total ?? '-', icon: Users, color: 'text-[var(--text-accent)]' },
-    { label: '试用中', value: stats?.by_status?.trial ?? 0, icon: Clock, color: 'text-amber-400' },
-    { label: '已订阅', value: stats?.by_status?.subscribed ?? 0, icon: CheckCircle, color: 'text-emerald-400' },
-    { label: '已失效', value: (stats?.by_status?.expired ?? 0) + (stats?.by_status?.invalid ?? 0), icon: XCircle, color: 'text-red-400' },
+    { label: '总账号数', value: stats?.total ?? '-', icon: Users, color: 'text-[var(--accent)]', bgColor: 'bg-[var(--accent)]/10' },
+    { label: '试用中', value: stats?.by_status?.trial ?? 0, icon: Clock, color: 'text-amber-400', bgColor: 'bg-amber-500/10' },
+    { label: '已订阅', value: stats?.by_status?.subscribed ?? 0, icon: CheckCircle, color: 'text-emerald-400', bgColor: 'bg-emerald-500/10' },
+    { label: '已失效', value: (stats?.by_status?.expired ?? 0) + (stats?.by_status?.invalid ?? 0), icon: XCircle, color: 'text-red-400', bgColor: 'bg-red-500/10' },
   ]
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--text-primary)]">仪表盘</h1>
@@ -57,14 +57,16 @@ export default function Dashboard() {
 
       {/* 统计卡片 */}
       <div className="grid grid-cols-4 gap-4">
-        {statCards.map(({ label, value, icon: Icon, color }) => (
-          <Card key={label}>
+        {statCards.map(({ label, value, icon: Icon, color, bgColor }) => (
+          <Card key={label} hoverable>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-[var(--text-muted)]">{label}</p>
                 <p className="text-3xl font-bold text-[var(--text-primary)] mt-1">{value}</p>
               </div>
-              <Icon className={`h-8 w-8 ${color} opacity-80`} />
+              <div className={`p-3 rounded-xl ${bgColor}`}>
+                <Icon className={`h-6 w-6 ${color}`} />
+              </div>
             </div>
           </Card>
         ))}
@@ -72,11 +74,11 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-2 gap-4">
         {/* 平台分布 */}
-        <Card>
+        <Card hoverable>
           <CardHeader><CardTitle>平台分布</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             {stats ? Object.entries(stats.by_platform || {}).map(([platform, count]: any) => (
-              <div key={platform} className="flex items-center justify-between">
+              <div key={platform} className="flex items-center justify-between hover-lift p-2 -mx-2 rounded-lg">
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-medium ${PLATFORM_COLORS[platform] || 'text-[var(--text-secondary)]'}`}>
                     {platform}
@@ -85,7 +87,7 @@ export default function Dashboard() {
                 <div className="flex items-center gap-3">
                   <div className="w-32 h-2 bg-[var(--bg-hover)] rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-indigo-500 rounded-full"
+                      className="h-full bg-gradient-to-r from-[var(--accent)] to-indigo-400 rounded-full transition-all duration-500"
                       style={{ width: `${Math.round((count / stats.total) * 100)}%` }}
                     />
                   </div>
@@ -97,11 +99,11 @@ export default function Dashboard() {
         </Card>
 
         {/* 状态分布 */}
-        <Card>
+        <Card hoverable>
           <CardHeader><CardTitle>状态分布</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             {stats ? Object.entries(stats.by_status || {}).map(([status, count]: any) => (
-              <div key={status} className="flex items-center justify-between">
+              <div key={status} className="flex items-center justify-between hover-lift p-2 -mx-2 rounded-lg">
                 <Badge variant={STATUS_VARIANT[status] || 'secondary'}>{status}</Badge>
                 <span className="text-sm text-[var(--text-muted)]">{count}</span>
               </div>

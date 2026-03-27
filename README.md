@@ -80,10 +80,10 @@ cd ..
 
 ```bash
 # Playwright 浏览器
-python3 -m playwright install chromium
+python -m playwright install chromium
 
 # Camoufox（用于本地 Turnstile Solver）
-python3 -m camoufox fetch
+python -m camoufox fetch
 ```
 
 ### 启动
