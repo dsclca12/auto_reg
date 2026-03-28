@@ -79,7 +79,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'MoeMail',
-        desc: '自动注册账号并生成临时邮箱，默认无需配置',
+        desc: '自动注册账号并生成临时邮箱',
         fields: [{ key: 'moemail_api_url', label: 'API URL', placeholder: 'https://sall.cc' }],
       },
       {
@@ -89,7 +89,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'DuckMail',
-        desc: '自动生成邮箱，随机创建账号（默认无需配置）',
+        desc: '自动生成邮箱，随机创建账号',
         fields: [
           { key: 'duckmail_api_url', label: 'Web URL', placeholder: 'https://www.duckmail.sbs' },
           { key: 'duckmail_provider_url', label: 'Provider URL', placeholder: 'https://api.duckmail.sbs' },
