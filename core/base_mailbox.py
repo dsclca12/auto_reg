@@ -1,4 +1,6 @@
 """邮箱池基类 - 抽象临时邮箱/收件服务"""
+import json
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Any
@@ -116,7 +118,16 @@ def create_mailbox(provider: str, extra: dict = None, proxy: str = None) -> 'Bas
             admin_token=extra.get("cfworker_admin_token", ""),
             domain=extra.get("cfworker_domain", ""),
             fingerprint=extra.get("cfworker_fingerprint", ""),
+            custom_auth=extra.get("cfworker_custom_auth", ""),
             proxy=proxy,
+        )
+    elif provider == "luckmail":
+        return LuckMailMailbox(
+            base_url=extra.get("luckmail_base_url") or "https://mails.luckyous.com/",
+            api_key=extra.get("luckmail_api_key", ""),
+            project_code=extra.get("luckmail_project_code", ""),
+            email_type=extra.get("luckmail_email_type", ""),
+            domain=extra.get("luckmail_domain", ""),
         )
     else:  # laoudo
         return LaoudoMailbox(
@@ -400,11 +411,12 @@ class CFWorkerMailbox(BaseMailbox):
     """Cloudflare Worker 自建临时邮箱服务"""
 
     def __init__(self, api_url: str, admin_token: str = "", domain: str = "",
-                 fingerprint: str = "", proxy: str = None):
+                 fingerprint: str = "", custom_auth: str = "", proxy: str = None):
         self.api = api_url.rstrip("/")
         self.admin_token = admin_token
         self.domain = domain
         self.fingerprint = fingerprint
+        self.custom_auth = custom_auth
         self.proxy = {"http": proxy, "https": proxy} if proxy else None
         self._token = None
 
@@ -416,6 +428,8 @@ class CFWorkerMailbox(BaseMailbox):
         }
         if self.fingerprint:
             h["x-fingerprint"] = self.fingerprint
+        if self.custom_auth:
+            h["x-custom-auth"] = self.custom_auth
         return h
 
     def _ensure_api_configured(self) -> None:
@@ -431,6 +445,38 @@ class CFWorkerMailbox(BaseMailbox):
             raise RuntimeError(
                 f"CF Worker {action} 返回非 JSON 响应: HTTP {response.status_code}, body={snippet}"
             )
+    def _request_json(self, method: str, path: str, *, params: dict | None = None,
+                      payload: dict | None = None, timeout: int = 15):
+        import requests
+
+        url = f"{self.api}{path}"
+        response = requests.request(
+            method,
+            url,
+            params=params,
+            json=payload,
+            headers=self._headers(),
+            proxies=self.proxy,
+            timeout=timeout,
+        )
+        body = (response.text or "").strip()
+        preview = body[:200] or "<empty>"
+
+        if response.status_code >= 400:
+            if "private site password" in body.lower():
+                raise RuntimeError(
+                    "CFWorker API 需要私有站点密码，请配置 cfworker_custom_auth"
+                )
+            raise RuntimeError(
+                f"CFWorker API {path} 失败: HTTP {response.status_code} {preview}"
+            )
+
+        try:
+            return response.json()
+        except Exception as e:
+            raise RuntimeError(
+                f"CFWorker API {path} 返回非 JSON: HTTP {response.status_code} {preview}"
+            ) from e
 
     def _generate_local_part(self) -> str:
         import random, string
@@ -457,6 +503,11 @@ class CFWorkerMailbox(BaseMailbox):
         token = data.get("token", data.get("jwt", ""))
         if not email:
             raise RuntimeError(f"CF Worker 创建邮箱失败: 返回缺少 email/address, body={str(data)[:200]}")
+        data = self._request_json("POST", "/admin/new_address", payload=payload, timeout=15)
+        email = data.get("email", data.get("address", ""))
+        token = data.get("token", data.get("jwt", ""))
+        if not email or not token:
+            raise RuntimeError(f"CFWorker API /admin/new_address 返回缺少 email/jwt: {data}")
         self._token = token
         print(f"[CFWorker] 生成邮箱: {email} token={token[:40] if token else 'NONE'}...")
         return MailboxAccount(email=email, account_id=token)
@@ -470,6 +521,12 @@ class CFWorkerMailbox(BaseMailbox):
         data = self._read_json(r, "mails")
         if r.status_code >= 400:
             raise RuntimeError(f"CF Worker 拉取邮件失败: HTTP {r.status_code}, body={str(data)[:200]}")
+        data = self._request_json(
+            "GET",
+            "/admin/mails",
+            params={"limit": 20, "offset": 0, "address": email},
+            timeout=10,
+        )
         return data.get("results", data) if isinstance(data, dict) else data
 
     def get_current_ids(self, account: MailboxAccount) -> set:
@@ -497,7 +554,6 @@ class CFWorkerMailbox(BaseMailbox):
                     mid = str(mail.get("id", ""))
                     if not mid or mid in seen:
                         continue
-                    seen.add(mid)
 
                     created_at = str(mail.get("created_at", "") or "").strip()
                     if otp_cutoff and created_at:
@@ -508,6 +564,9 @@ class CFWorkerMailbox(BaseMailbox):
                                 continue
                         except Exception:
                             pass
+
+                    # 仅在通过时间边界筛选后再标记为已处理，避免边界邮件被过早加入 seen。
+                    seen.add(mid)
 
                     raw = str(mail.get("raw", ""))
                     subject = str(mail.get("subject", ""))
@@ -630,6 +689,222 @@ class MoeMailMailbox(BaseMailbox):
                 pass
             time.sleep(3)
         raise TimeoutError(f"等待验证码超时 ({timeout}s)")
+
+
+class LuckMailMailbox(BaseMailbox):
+    """LuckMail 混合模式：ChatGPT 走购买邮箱，其他平台走订单接码"""
+
+    def __init__(self, base_url: str, api_key: str,
+                 project_code: str = "", email_type: str = "",
+                 domain: str = ""):
+        if not base_url or not api_key:
+            raise RuntimeError(
+                "LuckMail 未配置：请在全局设置中填写 luckmail_base_url 和 luckmail_api_key"
+            )
+        from .luckmail import LuckMailClient
+        self._client = LuckMailClient(
+            base_url=base_url,
+            api_key=api_key,
+        )
+        self._project_code = project_code
+        self._email_type = email_type or None
+        self._domain = domain or None
+        self._order_no = None
+        self._token = None
+        self._email = None
+
+    def _use_purchase_mode(self, account: MailboxAccount = None) -> bool:
+        if account and account.account_id and str(account.account_id).startswith("tok_"):
+            return True
+        if self._token:
+            return True
+        return self._project_code == "openai"
+
+    def _resolve_token(self, account: MailboxAccount = None) -> str:
+        token = (account.account_id if account else "") or self._token
+        if token:
+            self._token = token
+            return token
+
+        email = (account.email if account else "") or self._email
+        if not email:
+            return ""
+
+        try:
+            purchases = self._client.user.get_purchases(
+                page=1,
+                page_size=100,
+                keyword=email,
+            )
+        except Exception:
+            return ""
+
+        email_lower = str(email).strip().lower()
+        for item in purchases.list:
+            if str(item.email_address).strip().lower() == email_lower and item.token:
+                self._token = item.token
+                self._email = item.email_address
+                return item.token
+        return ""
+
+    def _extract_code_from_token_mails(self, token: str, code_pattern: str = None,
+                                       before_ids: set = None) -> Optional[str]:
+        try:
+            mail_list = self._client.user.get_token_mails(token)
+        except Exception:
+            return None
+
+        seen = {str(mid) for mid in (before_ids or set())}
+        for mail in mail_list.mails:
+            message_id = str(mail.message_id or "")
+            if message_id and message_id in seen:
+                continue
+            body = " ".join([
+                str(mail.subject or ""),
+                str(mail.body or ""),
+                str(mail.html_body or ""),
+            ])
+            code = self._safe_extract(body, code_pattern)
+            if code:
+                return code
+        return None
+
+    def get_email(self) -> MailboxAccount:
+        if not self._project_code:
+            raise RuntimeError("LuckMail 未设置 project_code，无法创建邮箱")
+
+        if self._use_purchase_mode():
+            self._log(
+                f"[LuckMail] 分支: ChatGPT + LuckMail -> 购买邮箱接口 "
+                f"(project_code={self._project_code}, email_type={self._email_type or '-'}, domain={self._domain or '-'})"
+            )
+            try:
+                result = self._client.user.purchase_emails(
+                    project_code=self._project_code,
+                    quantity=1,
+                    email_type=self._email_type,
+                    domain=self._domain,
+                )
+            except Exception as e:
+                raise RuntimeError(f"LuckMail 购买邮箱失败: {e}") from e
+
+            purchases = (result or {}).get("purchases") or []
+            if not purchases:
+                raise RuntimeError(f"LuckMail 购买邮箱返回为空: {result}")
+
+            item = purchases[0]
+            email = str(item.get("email_address") or "").strip()
+            token = str(item.get("token") or "").strip()
+            if not email or not token:
+                raise RuntimeError(f"LuckMail 返回缺少 email/token: {item}")
+
+            self._email = email
+            self._token = token
+            self._log(f"[LuckMail] 已购邮箱: {email}")
+            if item.get("warranty_until"):
+                self._log(f"[LuckMail] 质保到期: {item.get('warranty_until')}")
+            return MailboxAccount(
+                email=email,
+                account_id=token,
+                extra={
+                    "provider": "luckmail",
+                    "token": token,
+                    "project_code": self._project_code,
+                },
+            )
+
+        self._log(
+            f"[LuckMail] 分支: 其他平台 + LuckMail -> 创建订单/订单接码 "
+            f"(project_code={self._project_code}, email_type={self._email_type or '-'})"
+        )
+        try:
+            body = {"project_code": self._project_code}
+            if self._email_type:
+                body["email_type"] = self._email_type
+            order = self._client.user._sync_create_order(body)
+        except Exception as e:
+            raise RuntimeError(f"LuckMail 创建订单失败: {e}") from e
+        self._order_no = order.order_no
+        email = order.email_address
+        self._email = email
+        self._log(f"[LuckMail] 订单 {order.order_no} 分配邮箱: {email}")
+        self._log(f"[LuckMail] 超时时间: {order.expired_at}")
+        return MailboxAccount(email=email, account_id=order.order_no)
+
+    def get_current_ids(self, account: MailboxAccount) -> set:
+        if not self._use_purchase_mode(account):
+            return set()
+        token = self._resolve_token(account)
+        if not token:
+            return set()
+        try:
+            mail_list = self._client.user.get_token_mails(token)
+            return {str(m.message_id) for m in (mail_list.mails or []) if m.message_id}
+        except Exception:
+            return set()
+
+    def wait_for_code(self, account: MailboxAccount, keyword: str = "",
+                      timeout: int = 120, before_ids: set = None,
+                      code_pattern: str = None, **kwargs) -> str:
+        if not self._use_purchase_mode(account):
+            self._log("[LuckMail] 等验证码分支: 订单接码")
+            order_no = account.account_id or self._order_no
+            if not order_no:
+                raise RuntimeError("LuckMail 未创建订单，无法等待验证码")
+
+            def on_poll_order(result):
+                self._log(f"[LuckMail] 轮询中... 状态: {result.status}")
+
+            try:
+                code_result = self._client.user._sync_wait_for_code(
+                    order_no=order_no,
+                    timeout=timeout,
+                    interval=3.0,
+                    on_poll=on_poll_order,
+                )
+            except Exception as e:
+                raise TimeoutError(f"LuckMail 等待验证码失败: {e}") from e
+
+            if code_result.status == "success" and code_result.verification_code:
+                code = code_result.verification_code
+                self._log(f"[LuckMail] 收到验证码: {code}")
+                return code
+
+            raise TimeoutError(
+                f"LuckMail 等待验证码超时 ({timeout}s)，最终状态: {code_result.status}"
+            )
+
+        token = self._resolve_token(account)
+        if not token:
+            raise RuntimeError("LuckMail 未找到已购邮箱 Token，无法等待验证码")
+        self._log("[LuckMail] 等验证码分支: 已购邮箱 Token 收码")
+
+        def on_poll(result):
+            self._log(f"[LuckMail] 轮询中... 新邮件: {'是' if result.has_new_mail else '否'}")
+
+        try:
+            code_result = self._client.user.wait_for_token_code(
+                token=token,
+                timeout=timeout,
+                interval=3.0,
+                on_poll=on_poll,
+            )
+        except Exception as e:
+            raise TimeoutError(f"LuckMail 等待验证码失败: {e}") from e
+
+        code = code_result.verification_code
+        if not code and code_result.mail:
+            code = self._safe_extract(json.dumps(code_result.mail, ensure_ascii=False), code_pattern)
+        if not code and (code_result.has_new_mail or before_ids is None):
+            code = self._extract_code_from_token_mails(token, code_pattern, before_ids=before_ids)
+
+        if code:
+            self._log(f"[LuckMail] 收到验证码: {code}")
+            return code
+
+        raise TimeoutError(
+            f"LuckMail 等待验证码超时 ({timeout}s)，最终状态: has_new_mail={code_result.has_new_mail}"
+        )
 
 
 class FreemailMailbox(BaseMailbox):

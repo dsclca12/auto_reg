@@ -104,9 +104,12 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
         PlatformCls = get(req.platform)
 
         def _build_mailbox(proxy: Optional[str]):
+            from core.config_store import config_store
+            merged_extra = config_store.get_all().copy()
+            merged_extra.update({k: v for k, v in req.extra.items() if v is not None and v != ""})
             return create_mailbox(
-                provider=req.extra.get("mail_provider", "laoudo"),
-                extra=req.extra,
+                provider=merged_extra.get("mail_provider", "laoudo"),
+                extra=merged_extra,
                 proxy=proxy,
             )
 
@@ -126,11 +129,15 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                             _log(task_id, f"第 {i+1} 个账号启动前延迟 {wait_seconds:g} 秒")
                             time.sleep(wait_seconds)
                         next_start_time = time.time() + req.register_delay_seconds
+                from core.config_store import config_store
+                merged_extra = config_store.get_all().copy()
+                merged_extra.update({k: v for k, v in req.extra.items() if v is not None and v != ""})
+                
                 _config = RegisterConfig(
                     executor_type=req.executor_type,
                     captcha_solver=req.captcha_solver,
                     proxy=_proxy,
-                    extra=req.extra,
+                    extra=merged_extra,
                 )
                 _mailbox = _build_mailbox(_proxy)
                 _platform = PlatformCls(config=_config, mailbox=_mailbox)
@@ -145,6 +152,22 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                     email=req.email or None,
                     password=req.password,
                 )
+                if isinstance(account.extra, dict):
+                    mail_provider = merged_extra.get("mail_provider", "")
+                    if mail_provider:
+                        account.extra.setdefault("mail_provider", mail_provider)
+                    if mail_provider == "luckmail" and req.platform == "chatgpt":
+                        mailbox_token = getattr(_mailbox, "_token", "") or ""
+                        if mailbox_token:
+                            account.extra.setdefault("mailbox_token", mailbox_token)
+                        if merged_extra.get("luckmail_project_code"):
+                            account.extra.setdefault("luckmail_project_code", merged_extra.get("luckmail_project_code"))
+                        if merged_extra.get("luckmail_email_type"):
+                            account.extra.setdefault("luckmail_email_type", merged_extra.get("luckmail_email_type"))
+                        if merged_extra.get("luckmail_domain"):
+                            account.extra.setdefault("luckmail_domain", merged_extra.get("luckmail_domain"))
+                        if merged_extra.get("luckmail_base_url"):
+                            account.extra.setdefault("luckmail_base_url", merged_extra.get("luckmail_base_url"))
                 save_account(account)
                 if _proxy: proxy_pool.report_success(_proxy)
                 _log(task_id, f"✓ 注册成功: {account.email}")
@@ -197,6 +220,21 @@ def create_register_task(
     req: RegisterTaskRequest,
     background_tasks: BackgroundTasks,
 ):
+    mail_provider = req.extra.get("mail_provider")
+    if mail_provider == "luckmail":
+        platform = req.platform
+        if platform in ("tavily", "openblocklabs"):
+            raise HTTPException(400, f"LuckMail 渠道暂时不支持 {platform} 项目注册")
+        
+        mapping = {
+            "trae": "trae",
+            "cursor": "cursor",
+            "grok": "grok",
+            "kiro": "kiro",
+            "chatgpt": "openai"
+        }
+        req.extra["luckmail_project_code"] = mapping.get(platform, platform)
+
     task_id = f"task_{int(time.time()*1000)}"
     with _tasks_lock:
         _tasks[task_id] = {"id": task_id, "status": "pending",

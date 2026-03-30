@@ -21,11 +21,12 @@ const SELECT_FIELDS: Record<string, { label: string; value: string }[]> = {
     { label: 'MoeMail (sall.cc)', value: 'moemail' },
     { label: 'Freemail（自建 CF Worker）', value: 'freemail' },
     { label: 'CF Worker（自建域名）', value: 'cfworker' },
+    { label: 'LuckMail（订单接码 / 已购邮箱）', value: 'luckmail' },
   ],
   default_executor: [
     { label: 'API 协议（无浏览器）', value: 'protocol' },
     { label: '无头浏览器', value: 'headless' },
-    { label: '有头浏览器（调试用）', value: 'headed' },
+    { label: '有头浏览器', value: 'headed' },
   ],
   default_captcha_solver: [
     { label: 'YesCaptcha', value: 'yescaptcha' },
@@ -78,7 +79,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'MoeMail',
-        desc: '自动注册账号并生成临时邮箱，默认无需配置',
+        desc: '自动注册账号并生成临时邮箱',
         fields: [{ key: 'moemail_api_url', label: 'API URL', placeholder: 'https://sall.cc' }],
       },
       {
@@ -88,7 +89,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'DuckMail',
-        desc: '自动生成邮箱，随机创建账号（默认无需配置）',
+        desc: '自动生成邮箱，随机创建账号',
         fields: [
           { key: 'duckmail_api_url', label: 'Web URL', placeholder: 'https://www.duckmail.sbs' },
           { key: 'duckmail_provider_url', label: 'Provider URL', placeholder: 'https://api.duckmail.sbs' },
@@ -101,8 +102,19 @@ const TAB_ITEMS = [
         fields: [
           { key: 'cfworker_api_url', label: 'API URL', placeholder: 'https://apimail.example.com' },
           { key: 'cfworker_admin_token', label: '管理员 Token', secret: true },
+          { key: 'cfworker_custom_auth', label: '站点密码', secret: true },
           { key: 'cfworker_domain', label: '邮箱域名', placeholder: 'example.com' },
           { key: 'cfworker_fingerprint', label: 'Fingerprint', placeholder: '6703363b...' },
+        ],
+      },
+      {
+        title: 'LuckMail',
+        desc: 'ChatGPT 走购买邮箱，其他平台继续走订单接码老逻辑',
+        fields: [
+          { key: 'luckmail_base_url', label: '平台地址', placeholder: 'https://mails.luckyous.com' },
+          { key: 'luckmail_api_key', label: 'API Key', secret: true },
+          { key: 'luckmail_email_type', label: '邮箱类型（可选）', placeholder: 'ms_graph / ms_imap / self_built' },
+          { key: 'luckmail_domain', label: '邮箱域名（可选）', placeholder: 'outlook.com / gmail.com' },
         ],
       },
     ],
@@ -141,6 +153,18 @@ const TAB_ITEMS = [
         fields: [
           { key: 'team_manager_url', label: 'API URL', placeholder: 'https://your-tm.example.com' },
           { key: 'team_manager_key', label: 'API Key', secret: true },
+        ],
+      },
+      {
+        title: 'SMSToMe 手机验证',
+        desc: 'ChatGPT add_phone 阶段自动取号并轮询短信验证码',
+        fields: [
+          { key: 'smstome_cookie', label: 'SMSToMe Cookie', secret: true },
+          { key: 'smstome_country_slugs', label: '国家列表', placeholder: 'united-kingdom,poland' },
+          { key: 'smstome_phone_attempts', label: '手机号尝试次数', placeholder: '3' },
+          { key: 'smstome_otp_timeout_seconds', label: '短信等待秒数', placeholder: '45' },
+          { key: 'smstome_poll_interval_seconds', label: '轮询间隔秒数', placeholder: '5' },
+          { key: 'smstome_sync_max_pages_per_country', label: '每国同步页数', placeholder: '5' },
         ],
       },
     ],
@@ -242,7 +266,7 @@ function ConfigField({ field }: { field: FieldConfig }) {
   const options = SELECT_FIELDS[field.key]
   const helpText =
     field.key === 'default_executor'
-      ? '仅对支持的平台生效；当前只有 Trae 支持浏览器模式，其他平台会自动回退为纯协议。'
+      ? '仅对支持的平台生效；ChatGPT、Cursor、Grok、Kiro、Tavily、Trae 支持浏览器模式，OpenBlockLabs 仅支持纯协议。'
       : undefined
 
   return (
@@ -521,7 +545,12 @@ export default function Settings() {
   const [activeTab, setActiveTab] = useState('register')
 
   useEffect(() => {
-    apiFetch('/config').then(form.setFieldsValue)
+    apiFetch('/config').then((data) => {
+      if (!data.luckmail_base_url) {
+        data.luckmail_base_url = 'https://mails.luckyous.com/'
+      }
+      form.setFieldsValue(data)
+    })
   }, [])
 
   const save = async () => {

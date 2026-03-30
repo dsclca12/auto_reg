@@ -125,15 +125,29 @@ class KiroPlatform(BasePlatform):
                     reg = KiroRegister(proxy=self.config.proxy, tag="KIRO-SWITCH")
                     reg.log = getattr(self, "_log_fn", print)
                     otp_callback = None
-                    mail_provider = self.config.extra.get("mail_provider", "")
+                    mailbox_extra = dict(self.config.extra or {})
+                    for key in (
+                        "mail_provider",
+                        "luckmail_base_url",
+                        "luckmail_project_code",
+                        "luckmail_email_type",
+                        "luckmail_domain",
+                    ):
+                        if extra.get(key) not in (None, ""):
+                            mailbox_extra[key] = extra.get(key)
+
+                    mail_provider = mailbox_extra.get("mail_provider", "")
                     if mail_provider:
                         try:
                             mailbox = create_mailbox(
                                 provider=mail_provider,
-                                extra=self.config.extra,
+                                extra=mailbox_extra,
                                 proxy=self.config.proxy,
                             )
-                            mail_account = MailboxAccount(email=account.email, account_id="")
+                            mail_account = MailboxAccount(
+                                email=account.email,
+                                account_id=extra.get("mailbox_token", ""),
+                            )
                             before_ids = mailbox.get_current_ids(mail_account)
 
                             def _otp_cb():

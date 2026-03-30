@@ -48,8 +48,19 @@ export default function Register() {
         freemail_password: cfg.freemail_password || '',
         cfworker_api_url: cfg.cfworker_api_url || '',
         cfworker_admin_token: cfg.cfworker_admin_token || '',
+        cfworker_custom_auth: cfg.cfworker_custom_auth || '',
         cfworker_domain: cfg.cfworker_domain || '',
         cfworker_fingerprint: cfg.cfworker_fingerprint || '',
+        smstome_cookie: cfg.smstome_cookie || '',
+        smstome_country_slugs: cfg.smstome_country_slugs || '',
+        smstome_phone_attempts: cfg.smstome_phone_attempts || '',
+        smstome_otp_timeout_seconds: cfg.smstome_otp_timeout_seconds || '',
+        smstome_poll_interval_seconds: cfg.smstome_poll_interval_seconds || '',
+        smstome_sync_max_pages_per_country: cfg.smstome_sync_max_pages_per_country || '',
+        luckmail_base_url: cfg.luckmail_base_url || 'https://mails.luckyous.com/',
+        luckmail_api_key: cfg.luckmail_api_key || '',
+        luckmail_email_type: cfg.luckmail_email_type || '',
+        luckmail_domain: cfg.luckmail_domain || '',
       })
     })
   }, [form])
@@ -82,8 +93,19 @@ export default function Register() {
           freemail_password: values.freemail_password,
           cfworker_api_url: values.cfworker_api_url,
           cfworker_admin_token: values.cfworker_admin_token,
+          cfworker_custom_auth: values.cfworker_custom_auth,
           cfworker_domain: values.cfworker_domain,
           cfworker_fingerprint: values.cfworker_fingerprint,
+          smstome_cookie: values.smstome_cookie,
+          smstome_country_slugs: values.smstome_country_slugs,
+          smstome_phone_attempts: values.smstome_phone_attempts,
+          smstome_otp_timeout_seconds: values.smstome_otp_timeout_seconds,
+          smstome_poll_interval_seconds: values.smstome_poll_interval_seconds,
+          smstome_sync_max_pages_per_country: values.smstome_sync_max_pages_per_country,
+          luckmail_base_url: values.luckmail_base_url,
+          luckmail_api_key: values.luckmail_api_key,
+          luckmail_email_type: values.luckmail_email_type,
+          luckmail_domain: values.luckmail_domain,
           yescaptcha_key: values.yescaptcha_key,
           solver_url: values.solver_url,
         },
@@ -141,10 +163,13 @@ export default function Register() {
           <Form.Item name="platform" label="平台" rules={[{ required: true }]}>
             <Select
               options={[
+                { value: 'chatgpt', label: 'ChatGPT' },
                 { value: 'trae', label: 'Trae.ai' },
                 { value: 'cursor', label: 'Cursor' },
                 { value: 'kiro', label: 'Kiro' },
                 { value: 'grok', label: 'Grok' },
+                { value: 'tavily', label: 'Tavily' },
+                { value: 'openblocklabs', label: 'OpenBlockLabs' },
               ]}
             />
           </Form.Item>
@@ -185,6 +210,7 @@ export default function Register() {
                 { value: 'freemail', label: 'Freemail' },
                 { value: 'laoudo', label: 'Laoudo' },
                 { value: 'cfworker', label: 'CF Worker' },
+                { value: 'luckmail', label: 'LuckMail' },
               ]}
             />
           </Form.Item>
@@ -209,6 +235,9 @@ export default function Register() {
               <Form.Item name="cfworker_admin_token" label="Admin Token">
                 <Input placeholder="abc123,,,abc" />
               </Form.Item>
+              <Form.Item name="cfworker_custom_auth" label="Site Password">
+                <Input.Password placeholder="private site password" />
+              </Form.Item>
               <Form.Item name="cfworker_domain" label="域名">
                 <Input placeholder="example.com" />
               </Form.Item>
@@ -217,7 +246,49 @@ export default function Register() {
               </Form.Item>
             </>
           )}
+          {mailProvider === 'luckmail' && (
+            <>
+              <Form.Item name="luckmail_base_url" label="平台地址">
+                <Input placeholder="https://mails.luckyous.com" />
+              </Form.Item>
+              <Form.Item name="luckmail_api_key" label="API Key">
+                <Input.Password placeholder="ak_..." />
+              </Form.Item>
+              <Form.Item name="luckmail_email_type" label="邮箱类型（可选）">
+                <Input placeholder="ms_graph / ms_imap" />
+              </Form.Item>
+              <Form.Item name="luckmail_domain" label="邮箱域名（可选）">
+                <Input placeholder="outlook.com" />
+              </Form.Item>
+            </>
+          )}
         </Card>
+
+        {platform === 'chatgpt' && (
+          <Card title="ChatGPT 手机验证" style={{ marginBottom: 16 }}>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+              仅在 OAuth 流程进入 `add_phone` 时使用，用于自动取号并轮询短信验证码。
+            </Text>
+            <Form.Item name="smstome_cookie" label="SMSToMe Cookie">
+              <Input.Password placeholder="cf_clearance=...; PHPSESSID=..." />
+            </Form.Item>
+            <Form.Item name="smstome_country_slugs" label="国家列表">
+              <Input placeholder="united-kingdom,poland,finland" />
+            </Form.Item>
+            <Form.Item name="smstome_phone_attempts" label="手机号尝试次数">
+              <Input placeholder="3" />
+            </Form.Item>
+            <Form.Item name="smstome_otp_timeout_seconds" label="短信等待秒数">
+              <Input placeholder="45" />
+            </Form.Item>
+            <Form.Item name="smstome_poll_interval_seconds" label="轮询间隔秒数">
+              <Input placeholder="5" />
+            </Form.Item>
+            <Form.Item name="smstome_sync_max_pages_per_country" label="每国同步页数">
+              <Input placeholder="5" />
+            </Form.Item>
+          </Card>
+        )}
 
         {captchaSolver === 'yescaptcha' && (
           <Card title="验证码配置" style={{ marginBottom: 16 }}>

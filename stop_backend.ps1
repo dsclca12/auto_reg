@@ -65,16 +65,35 @@ function Stop-ProcessTreeSafe {
     }
 
     Write-Host "[INFO] 尝试优雅停止 PID=$ProcessId"
-    cmd /c "taskkill /PID $ProcessId /T" *> $null
+    try {
+        & taskkill.exe /PID $ProcessId /T *> $null
+    } catch {
+        Write-Warning "taskkill 优雅停止返回异常: $($_.Exception.Message)"
+    }
     if (Wait-ProcessExit -ProcessId $ProcessId -TimeoutSeconds 6) {
         Write-Host "[OK] 已停止 PID=$ProcessId"
         return $true
     }
 
     Write-Warning "PID=$ProcessId 未在预期时间退出，改为强制停止"
-    cmd /c "taskkill /PID $ProcessId /T /F" *> $null
+    try {
+        & taskkill.exe /PID $ProcessId /T /F *> $null
+    } catch {
+        Write-Warning "taskkill 强制停止返回异常: $($_.Exception.Message)"
+    }
     if (Wait-ProcessExit -ProcessId $ProcessId -TimeoutSeconds 6) {
         Write-Host "[OK] 已强制停止 PID=$ProcessId"
+        return $true
+    }
+
+    Write-Warning "taskkill 未能完全停止 PID=$ProcessId，尝试使用 Stop-Process -Force"
+    try {
+        Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+    } catch {
+        Write-Warning "Stop-Process -Force 失败: $($_.Exception.Message)"
+    }
+    if (Wait-ProcessExit -ProcessId $ProcessId -TimeoutSeconds 6) {
+        Write-Host "[OK] 已通过 Stop-Process 强制停止 PID=$ProcessId"
         return $true
     }
 

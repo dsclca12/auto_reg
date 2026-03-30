@@ -7,6 +7,7 @@ import base64
 import logging
 from typing import Tuple
 from datetime import datetime, timezone, timedelta
+import hashlib
 
 from curl_cffi import requests as cffi_requests
 from curl_cffi import CurlMime
@@ -29,6 +30,122 @@ def _decode_jwt_payload(token: str) -> dict:
         return {}
 
 
+def _b64url_json(data: dict) -> str:
+    raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _b64url_bytes(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _derive_display_name(email: str) -> str:
+    local = (email or "").split("@", 1)[0].replace(".", " ").replace("_", " ").replace("-", " ")
+    parts = [part for part in local.split() if part]
+    if not parts:
+        return "OpenAI User"
+    return " ".join(part[:1].upper() + part[1:] for part in parts[:3])
+
+
+def _get_auth_info(payload: dict) -> dict:
+    nested = payload.get("https://api.openai.com/auth", {})
+    if isinstance(nested, dict) and nested:
+        return nested
+
+    flat = {}
+    for key, value in payload.items():
+        if key.startswith("https://api.openai.com/auth."):
+            flat[key.split(".", 4)[-1]] = value
+    return flat
+
+
+def _build_compat_id_token(
+    *,
+    access_token: str,
+    email: str,
+) -> str:
+    """
+    基于 access_token 构造一个仅供本地 CPA/玩具环境解析的兼容 id_token。
+    注意：该 token 仅用于不校验签名、只解析 payload 的本地兼容场景。
+    """
+    payload = _decode_jwt_payload(access_token)
+    if not payload:
+        return ""
+
+    auth_info = _get_auth_info(payload)
+    email_from_token = ((payload.get("https://api.openai.com/profile") or {}).get("email") or payload.get("email") or email or "").strip()
+    email_verified = bool(
+        ((payload.get("https://api.openai.com/profile") or {}).get("email_verified"))
+        if isinstance(payload.get("https://api.openai.com/profile"), dict)
+        else payload.get("email_verified", True)
+    )
+    account_id = str(auth_info.get("chatgpt_account_id") or auth_info.get("account_id") or "").strip()
+    user_id = str(
+        auth_info.get("chatgpt_user_id")
+        or auth_info.get("user_id")
+        or payload.get("sub")
+        or ""
+    ).strip()
+    iat = int(payload.get("iat") or 0)
+    exp = int(payload.get("exp") or 0)
+    auth_time = int(payload.get("pwd_auth_time") or payload.get("auth_time") or iat or 0)
+    session_id = str(payload.get("session_id") or f"compat_session_{(account_id or user_id or 'unknown').replace('-', '')[:24]}").strip()
+    plan_type = str(auth_info.get("chatgpt_plan_type") or "free").strip() or "free"
+    organization_id = str(auth_info.get("organization_id") or f"org-{hashlib.sha1((account_id or email_from_token or user_id).encode('utf-8')).hexdigest()[:24]}")
+    project_id = str(auth_info.get("project_id") or f"proj_{hashlib.sha1((organization_id + ':' + (account_id or user_id)).encode('utf-8')).hexdigest()[:24]}")
+
+    compat_auth = {
+        "chatgpt_account_id": account_id,
+        "chatgpt_plan_type": plan_type,
+        "chatgpt_subscription_active_start": auth_info.get("chatgpt_subscription_active_start"),
+        "chatgpt_subscription_active_until": auth_info.get("chatgpt_subscription_active_until"),
+        "chatgpt_subscription_last_checked": auth_info.get("chatgpt_subscription_last_checked"),
+        "chatgpt_user_id": user_id,
+        "completed_platform_onboarding": bool(auth_info.get("completed_platform_onboarding", False)),
+        "groups": auth_info.get("groups", []),
+        "is_org_owner": bool(auth_info.get("is_org_owner", True)),
+        "localhost": bool(auth_info.get("localhost", True)),
+        "organization_id": organization_id,
+        "organizations": auth_info.get("organizations") or [
+            {
+                "id": organization_id,
+                "is_default": True,
+                "role": "owner",
+                "title": "Personal",
+            }
+        ],
+        "project_id": project_id,
+        "user_id": str(auth_info.get("user_id") or user_id or "").strip(),
+    }
+
+    compat_payload = {
+        "amr": ["pwd", "otp", "mfa", "urn:openai:amr:otp_email"],
+        "at_hash": hashlib.sha256(access_token.encode("utf-8")).hexdigest()[:22],
+        "aud": ["app_EMoamEEZ73f0CkXaXp7hrann"],
+        "auth_provider": "password",
+        "auth_time": auth_time,
+        "email": email_from_token,
+        "email_verified": email_verified,
+        "exp": exp,
+        "https://api.openai.com/auth": compat_auth,
+        "iat": iat,
+        "iss": payload.get("iss") or "https://auth.openai.com",
+        "jti": f"compat-{hashlib.sha1(access_token.encode('utf-8')).hexdigest()[:32]}",
+        "name": _derive_display_name(email_from_token),
+        "rat": auth_time,
+        "sid": session_id,
+        "sub": payload.get("sub") or user_id,
+    }
+
+    header = {
+        "alg": "RS256",
+        "typ": "JWT",
+        "kid": "compat",
+    }
+    signature = _b64url_bytes(b"compat_signature_for_cpa_parsing_only")
+    return f"{_b64url_json(header)}.{_b64url_json(compat_payload)}.{signature}"
+
+
 def _get_config_value(key: str) -> str:
     try:
         from core.config_store import config_store
@@ -47,12 +164,14 @@ def generate_token_json(account) -> dict:
     access_token = getattr(account, "access_token", "")
     refresh_token = getattr(account, "refresh_token", "")
     id_token = getattr(account, "id_token", "")
+    if access_token and not id_token:
+        id_token = _build_compat_id_token(access_token=access_token, email=email)
 
     expired_str = ""
     account_id = ""
     if access_token:
         payload = _decode_jwt_payload(access_token)
-        auth_info = payload.get("https://api.openai.com/auth", {})
+        auth_info = _get_auth_info(payload)
         account_id = auth_info.get("chatgpt_account_id", "")
         exp_timestamp = payload.get("exp")
         if isinstance(exp_timestamp, int) and exp_timestamp > 0:

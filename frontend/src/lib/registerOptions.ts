@@ -5,7 +5,13 @@ export const EXECUTOR_OPTIONS = [
 ] as const
 
 const PLATFORM_EXECUTORS: Record<string, string[]> = {
+  chatgpt: ['protocol', 'headless', 'headed'],
+  cursor: ['protocol', 'headless', 'headed'],
+  grok: ['protocol', 'headless', 'headed'],
+  kiro: ['protocol', 'headless', 'headed'],
+  tavily: ['protocol', 'headless', 'headed'],
   trae: ['protocol', 'headless', 'headed'],
+  openblocklabs: ['protocol'],
 }
 
 export function getSupportedExecutors(platform?: string) {

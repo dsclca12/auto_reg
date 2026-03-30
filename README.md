@@ -60,11 +60,11 @@
 
 ### 仪表盘
 
-![仪表盘](./docs/images/dashboard.png)
+![仪表盘](docs/images/dashboard.png)
 
 ### 全局配置 / 插件管理
 
-![全局配置 / 插件管理](./docs/images/settings-integrations.png)
+![全局配置 / 插件管理](docs/images/settings-integrations.png)
 
 ## 技术栈
 
@@ -180,6 +180,36 @@ http://localhost:8000
 ```
 
 > 注意：生产/本地构建模式下，前端由 FastAPI 直接托管，访问的是 `8000`，不是 `5173`。
+
+### Docker 启动
+
+如果你只想快速拉起整个项目，可以直接使用仓库根目录的 `Dockerfile` 和 `docker-compose.yml`：
+
+```bash
+docker compose up --build -d
+```
+
+默认会暴露：
+
+- Web UI / API：`http://localhost:8000`
+- Turnstile Solver：`http://localhost:8889`
+
+容器内仍然沿用“后端自动拉起本地 Solver”的方式，但 `docker-compose.yml` 默认把 Solver 浏览器切到 `chromium`，避免额外依赖本机 conda/camoufox 环境。
+
+运行时数据会持久化到 compose volume 中，包括：
+
+- SQLite 数据库 `account_manager.db`
+- `smstome_used/` 里的已用号 / 黑名单
+- `smstome_all_numbers.txt`
+
+如果需要传入 `SMSTOME_COOKIE`、`OPENAI_*` 等配置，直接写在仓库根目录 `.env` 即可；`docker compose` 会把它们注入到容器环境中。
+
+常用命令：
+
+```bash
+docker compose logs -f
+docker compose down
+```
 
 ### 停止后端
 
@@ -346,6 +376,18 @@ http://localhost:8889/
 > - **内置临时邮箱成功率：0%**
 >
 > 如需注册 Kiro 账号，建议只使用 **自建邮箱**。
+
+### 邮箱服务汇总
+
+| 服务名称           | 访问地址                                                       | 说明                             | 是否需要配置 |
+| -------------- | ---------------------------------------------------------- | ------------------------------ | ------ |
+| TempMail.lol   | <https://tempmail.lol>                                     | 自动生成邮箱，无需配置，CN IP 被封需代理。推荐默认使用 | 否（需代理） |
+| LuckMail       | <https://mails.luckyous.com>                               | ChatGPT 走购买邮箱，其他平台走订单接码        | 是      |
+| CF Worker 自建邮箱 | <https://github.com/dreamhunter2333/cloudflare_temp_email> | 基于 Cloudflare Worker 的自建临时邮箱   | 是（需自建） |
+| MoeMail        | <https://sall.cc>                                          | 自动注册账号并生成临时邮箱                  | 是      |
+| DuckMail       | <https://www.duckmail.sbs>                                 | 自动生成邮箱，随机创建账号                  | 是      |
+| Laoudo         | <https://laoudo.com>                                       | 固定邮箱，适合需要固定邮箱地址的场景             | 是      |
+| Freemail       | <https://github.com/idinging/freemail>                     | 基于 Cloudflare Worker 的自建邮箱服务   | 是（需自建） |
 
 ### MoeMail
 

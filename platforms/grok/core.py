@@ -12,7 +12,7 @@ import ctypes
 import random
 import string
 import time
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 
 UA = (
@@ -136,7 +136,7 @@ class GrokRegister:
         page.locator("input[name=password]").fill(password)
 
     @staticmethod
-    def _find_turnstile_box(page):
+    def _find_turnstile_widget(page) -> Tuple[object, Optional[dict]]:
         for frame in page.frames:
             if "challenges.cloudflare.com" not in frame.url:
                 continue
@@ -146,8 +146,8 @@ class GrokRegister:
             except Exception:
                 box = None
             if box and box["width"] > 100 and box["height"] >= 50:
-                return box
-        return None
+                return frame, box
+        return None, None
 
     @staticmethod
     def _read_turnstile_token(page) -> str:
@@ -161,10 +161,82 @@ class GrokRegister:
             }"""
         )
 
+    @staticmethod
+    def _read_turnstile_sitekey(page) -> str:
+        return page.evaluate(
+            """() => {
+                const byData = document.querySelector('[data-sitekey]')?.getAttribute('data-sitekey');
+                if (byData) return byData;
+
+                for (const iframe of document.querySelectorAll('iframe[src*="challenges.cloudflare.com"]')) {
+                    try {
+                        const u = new URL(iframe.src, location.href);
+                        const k = u.searchParams.get('k');
+                        if (k) return k;
+                    } catch (_) {}
+                }
+                return '';
+            }"""
+        )
+
+    @staticmethod
+    def _has_turnstile_error(page) -> bool:
+        keywords = ["验证失败", "故障排除", "verification failed", "troubleshoot", "try again"]
+        texts = []
+        try:
+            texts.append(page.locator("body").inner_text(timeout=800))
+        except Exception:
+            pass
+
+        for frame in page.frames:
+            if "challenges.cloudflare.com" not in frame.url:
+                continue
+            try:
+                texts.append(frame.locator("body").inner_text(timeout=500))
+            except Exception:
+                continue
+
+        merged = "\n".join(texts).lower()
+        return any(k.lower() in merged for k in keywords)
+
+    @staticmethod
+    def _inject_turnstile_token(page, token: str) -> bool:
+        return bool(
+            page.evaluate(
+                """(token) => {
+                    const selectors = [
+                        'input[id^="cf-chl-widget-"]',
+                        'input[name="cf-turnstile-response"]',
+                        'textarea[name="cf-turnstile-response"]',
+                        'textarea[name="g-recaptcha-response"]',
+                    ];
+                    const inputs = [];
+                    for (const sel of selectors) {
+                        document.querySelectorAll(sel).forEach((el) => inputs.push(el));
+                    }
+                    if (!inputs.length) {
+                        const fallback = document.createElement('input');
+                        fallback.type = 'hidden';
+                        fallback.name = 'cf-turnstile-response';
+                        document.body.appendChild(fallback);
+                        inputs.push(fallback);
+                    }
+                    for (const el of inputs) {
+                        el.value = token;
+                        el.setAttribute('value', token);
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    return inputs.length > 0;
+                }""",
+                token,
+            )
+        )
+
     def _wait_turnstile_token(self, page, wait_rounds: int = 25, wait_ms: int = 500) -> str:
         for _ in range(wait_rounds):
             token = self._read_turnstile_token(page)
-            if token:
+            if token and len(token) > 20:
                 return token
             page.wait_for_timeout(wait_ms)
         return ""
@@ -172,6 +244,10 @@ class GrokRegister:
     def _native_click_turnstile(self, page, box, offset_x: float) -> str:
         try:
             user32 = ctypes.windll.user32
+            try:
+                user32.SetProcessDPIAware()
+            except Exception:
+                pass
         except Exception as e:
             raise RuntimeError(f"当前系统不支持原生点击: {e}") from e
 
@@ -190,26 +266,55 @@ class GrokRegister:
 
         border_x = max(0, (metrics["outerWidth"] - metrics["innerWidth"]) / 2)
         chrome_y = max(0, metrics["outerHeight"] - metrics["innerHeight"] - border_x)
-        screen_x = metrics["screenX"] + border_x + box["x"] + offset_x
-        screen_y = metrics["screenY"] + chrome_y + box["y"] + box["height"] / 2
-        self.log(f"  Native click: ({screen_x:.1f}, {screen_y:.1f})")
+        raw_x = metrics["screenX"] + border_x + box["x"] + offset_x
+        raw_y = metrics["screenY"] + chrome_y + box["y"] + box["height"] / 2
+        dpr = float(metrics.get("dpr") or 1.0)
+        points = [(raw_x, raw_y)]
+        if abs(dpr - 1.0) > 0.05:
+            points.append((raw_x * dpr, raw_y * dpr))
 
-        user32.SetCursorPos(int(screen_x), int(screen_y))
-        time.sleep(0.15)
-        user32.mouse_event(0x0002, 0, 0, 0, 0)
-        time.sleep(0.12)
-        user32.mouse_event(0x0004, 0, 0, 0, 0)
+        for idx, (screen_x, screen_y) in enumerate(points, start=1):
+            self.log(f"  Native click #{idx}: ({screen_x:.1f}, {screen_y:.1f})")
+            user32.SetCursorPos(int(screen_x), int(screen_y))
+            time.sleep(0.15)
+            user32.mouse_event(0x0002, 0, 0, 0, 0)
+            time.sleep(0.12)
+            user32.mouse_event(0x0004, 0, 0, 0, 0)
 
-        token = self._wait_turnstile_token(page)
-        if token:
-            return token
+            token = self._wait_turnstile_token(page, wait_rounds=18, wait_ms=450)
+            if token:
+                return token
+
         raise RuntimeError("Native click 后仍未获取到 token")
+
+    def _solve_turnstile_by_solver(self, page) -> str:
+        if not self.captcha_solver:
+            return ""
+        solver_name = type(self.captcha_solver).__name__.lower()
+        if "manual" in solver_name:
+            return ""
+        client_key = getattr(self.captcha_solver, "client_key", None)
+        if client_key is not None and not str(client_key).strip():
+            self.log("  未配置 YesCaptcha key，跳过验证码服务兜底")
+            return ""
+        sitekey = self._read_turnstile_sitekey(page)
+        if not sitekey:
+            self.log("  未提取到 Turnstile sitekey，跳过验证码服务兜底")
+            return ""
+        self.log(f"  兜底: 调用验证码服务解 Turnstile (sitekey={sitekey[:8]}...)")
+        token = self.captcha_solver.solve_turnstile(page.url, sitekey)
+        if not token:
+            return ""
+        if self._inject_turnstile_token(page, token):
+            page.wait_for_timeout(400)
+            return self._read_turnstile_token(page) or token
+        return ""
 
     def _solve_turnstile_on_page(self, page) -> str:
         self.log("Step5: 点击页面内 Turnstile 复选框...")
         last_error = None
         for attempt in range(8):
-            box = self._find_turnstile_box(page)
+            frame, box = self._find_turnstile_widget(page)
             if not box:
                 page.wait_for_timeout(1000)
                 if last_error is None:
@@ -220,11 +325,17 @@ class GrokRegister:
             click_y = box["y"] + box["height"] / 2
             self.log(f"  Turnstile click #{attempt + 1}: ({click_x:.1f}, {click_y:.1f})")
             try:
+                if frame:
+                    frame.locator("body").click(
+                        position={"x": min(28, max(18, box["width"] * 0.08)), "y": box["height"] / 2},
+                        timeout=2500,
+                    )
+                    page.wait_for_timeout(120)
                 page.mouse.move(click_x, click_y)
                 page.mouse.down()
                 page.wait_for_timeout(120)
                 page.mouse.up()
-                token = self._wait_turnstile_token(page)
+                token = self._wait_turnstile_token(page, wait_rounds=28, wait_ms=450)
                 if token:
                     self.log(f"  Turnstile token: {token[:40]}...")
                     return token
@@ -239,13 +350,22 @@ class GrokRegister:
             except Exception as e:
                 last_error = str(e)
 
+            if self._has_turnstile_error(page):
+                self.log("  检测到 Turnstile 验证失败提示，准备重试...")
+            page.wait_for_timeout(900 + attempt * 120)
+
+        try:
+            token = self._solve_turnstile_by_solver(page)
+            if token:
+                self.log(f"  Turnstile token(兜底): {token[:40]}...")
+                return token
+        except Exception as e:
+            last_error = str(e)
+
         raise RuntimeError(last_error or "Turnstile 求解失败")
 
     def _submit_register(self, page) -> None:
         self.log("Step6: 提交完成注册...")
-        page.locator("button[type=submit]").click()
-        page.wait_for_timeout(1200)
-
         def _tos_or_account_ready() -> bool:
             url = page.url
             body = page.locator("body").inner_text()
@@ -258,8 +378,27 @@ class GrokRegister:
                 or self._has_auth_cookies(page.context.cookies())
             )
 
-        self._wait_until(_tos_or_account_ready, timeout=30, desc="等待注册后跳转超时")
-        page.wait_for_timeout(1200)
+        last_error = "等待注册后跳转超时"
+        for submit_attempt in range(1, 4):
+            page.locator("button[type=submit]").click()
+            page.wait_for_timeout(900)
+            start = time.time()
+            while time.time() - start < 18:
+                if _tos_or_account_ready():
+                    page.wait_for_timeout(1200)
+                    return
+                if self._has_turnstile_error(page):
+                    last_error = "Cloudflare 验证失败"
+                    break
+                page.wait_for_timeout(500)
+            else:
+                last_error = "等待注册后跳转超时"
+
+            if submit_attempt < 3:
+                self.log(f"  提交失败({last_error})，重新过 Turnstile 后重试...")
+                self._solve_turnstile_on_page(page)
+
+        raise RuntimeError(last_error)
 
     def _accept_tos_if_needed(self, page) -> None:
         def _tos_or_account_or_cookie() -> bool:

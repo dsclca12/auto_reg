@@ -6,8 +6,9 @@ import time
 import threading
 import requests
 
-SOLVER_PORT = 8889
+SOLVER_PORT = int(os.getenv("SOLVER_PORT", "8889"))
 SOLVER_URL = f"http://localhost:{SOLVER_PORT}"
+SOLVER_BROWSER_TYPE = os.getenv("SOLVER_BROWSER_TYPE", "camoufox").strip() or "camoufox"
 _proc: subprocess.Popen = None
 _log_file = None
 _lock = threading.Lock()
@@ -40,7 +41,7 @@ def start():
                 "-u",
                 solver_script,
                 "--browser_type",
-                "camoufox",
+                SOLVER_BROWSER_TYPE,
                 "--port",
                 str(SOLVER_PORT),
             ],

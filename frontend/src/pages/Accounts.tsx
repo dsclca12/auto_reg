@@ -85,7 +85,8 @@ function LogPanel({ taskId, onDone }: { taskId: string; onDone: () => void }) {
         style={{
           flex: 1,
           overflow: 'auto',
-          background: 'rgba(0,0,0,0.4)',
+          background: '#ffffff',
+          border: '1px solid #e5e7eb',
           borderRadius: 8,
           padding: 12,
           fontFamily: 'monospace',
@@ -98,13 +99,13 @@ function LogPanel({ taskId, onDone }: { taskId: string; onDone: () => void }) {
           whiteSpace: 'pre-wrap',
         }}
       >
-        {lines.length === 0 && <div style={{ color: '#7a8ba3' }}>等待日志...</div>}
+        {lines.length === 0 && <div style={{ color: '#9ca3af' }}>等待日志...</div>}
         {lines.map((l, i) => (
           <div
             key={i}
             style={{
               lineHeight: 1.5,
-              color: l.includes('✓') || l.includes('成功') ? '#10b981' : l.includes('✗') || l.includes('失败') || l.includes('错误') ? '#ef4444' : '#b0bcd4',
+              color: l.includes('✓') || l.includes('成功') ? '#059669' : l.includes('✗') || l.includes('失败') || l.includes('错误') ? '#dc2626' : '#1f2937',
             }}
           >
             {l}
@@ -403,8 +404,15 @@ export default function Accounts() {
             freemail_password: cfg.freemail_password,
             cfworker_api_url: cfg.cfworker_api_url,
             cfworker_admin_token: cfg.cfworker_admin_token,
+            cfworker_custom_auth: cfg.cfworker_custom_auth,
             cfworker_domain: cfg.cfworker_domain,
             cfworker_fingerprint: cfg.cfworker_fingerprint,
+            smstome_cookie: cfg.smstome_cookie,
+            smstome_country_slugs: cfg.smstome_country_slugs,
+            smstome_phone_attempts: cfg.smstome_phone_attempts,
+            smstome_otp_timeout_seconds: cfg.smstome_otp_timeout_seconds,
+            smstome_poll_interval_seconds: cfg.smstome_poll_interval_seconds,
+            smstome_sync_max_pages_per_country: cfg.smstome_sync_max_pages_per_country,
           },
         }),
       })
