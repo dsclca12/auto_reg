@@ -300,6 +300,19 @@ def _conda_exe() -> str | None:
     return None
 
 
+def _uv_exe() -> str | None:
+    candidate = shutil.which("uv")
+    if candidate and Path(candidate).exists():
+        return candidate
+    return None
+
+
+def _venv_python(repo: Path) -> Path:
+    if os.name == "nt":
+        return repo / ".venv" / "Scripts" / "python.exe"
+    return repo / ".venv" / "bin" / "python"
+
+
 def _resolve_kiro_exe() -> str | None:
     try:
         from core.config_store import config_store
@@ -398,6 +411,34 @@ def _ensure_grok2api_conda_env(repo: Path) -> str:
     return env_name
 
 
+def _ensure_grok2api_uv_env(repo: Path) -> str:
+    uv = _uv_exe()
+    if not uv:
+        raise RuntimeError("未找到 uv，无法为 grok2api 自动创建项目虚拟环境")
+
+    marker = repo / ".grok2api-env-ready"
+    if not marker.exists() or marker.read_text(encoding="utf-8").strip() != "uv":
+        subprocess.run(
+            [
+                uv,
+                "sync",
+                "--frozen",
+                "--no-dev",
+                "--no-install-project",
+                "--python",
+                "3.13",
+            ],
+            cwd=str(repo),
+            check=True,
+            creationflags=_creationflags(),
+        )
+        marker.write_text("uv", encoding="utf-8")
+    venv_python = _venv_python(repo)
+    if not venv_python.exists():
+        raise RuntimeError("grok2api 的 uv 环境创建失败，未找到 .venv/python")
+    return str(venv_python)
+
+
 def _ensure_cliproxyapi_runtime_config(repo: Path):
     config_path = repo / "config.local.yaml"
     if not config_path.exists():
@@ -479,15 +520,32 @@ def _build_command(name: str) -> tuple[list[str], Path]:
 
     if name == "grok2api":
         _ensure_grok2api_runtime_config(repo)
-        env_name = _ensure_grok2api_conda_env(repo)
         conda = _conda_exe()
+        if conda:
+            env_name = _ensure_grok2api_conda_env(repo)
+            return [
+                conda,
+                "run",
+                "--no-capture-output",
+                "-n",
+                env_name,
+                "python",
+                "-m",
+                "granian",
+                "--interface",
+                "asgi",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8011",
+                "--workers",
+                "1",
+                "main:app",
+            ], repo
+
+        python_exe = _ensure_grok2api_uv_env(repo)
         return [
-            conda,
-            "run",
-            "--no-capture-output",
-            "-n",
-            env_name,
-            "python",
+            python_exe,
             "-m",
             "granian",
             "--interface",

@@ -103,6 +103,7 @@ class ChatGPTPlatform(BasePlatform):
                 browser_mode=browser_mode,
                 callback_logger=log_fn,
                 max_retries=max_retries,
+                extra_config=(self.config.extra or {}),
             )
             engine.email = email
             engine.password = password
@@ -149,6 +150,7 @@ class ChatGPTPlatform(BasePlatform):
                 browser_mode=browser_mode,
                 callback_logger=log_fn,
                 max_retries=max_retries,
+                extra_config=(self.config.extra or {}),
             )
             if email:
                 engine.email = email
@@ -209,6 +211,14 @@ class ChatGPTPlatform(BasePlatform):
                     {"key": "api_key", "label": "TM API Key", "type": "text"},
                 ],
             },
+            {
+                "id": "upload_codex_proxy",
+                "label": "上传 CodexProxy",
+                "params": [
+                    {"key": "api_url", "label": "API URL", "type": "text"},
+                    {"key": "api_key", "label": "Admin Key", "type": "text"},
+                ],
+            },
         ]
 
     def execute_action(self, action_id: str, account: Account, params: dict) -> dict:
@@ -250,7 +260,14 @@ class ChatGPTPlatform(BasePlatform):
             if plan == "plus":
                 url = generate_plus_link(a, proxy=proxy, country=country)
             else:
-                url = generate_team_link(a, proxy=proxy, country=country)
+                url = generate_team_link(
+                    a,
+                    workspace_name=params.get("workspace_name", "MyTeam"),
+                    price_interval=params.get("price_interval", "month"),
+                    seat_quantity=int(params.get("seat_quantity", 5) or 5),
+                    proxy=proxy,
+                    country=country,
+                )
             return {"ok": bool(url), "data": {"url": url}}
 
         if action_id == "upload_cpa":
@@ -282,6 +299,31 @@ class ChatGPTPlatform(BasePlatform):
                 api_url=params.get("api_url"),
                 api_key=params.get("api_key"),
             )
+            return {"ok": ok, "data": msg}
+
+        if action_id == "upload_codex_proxy":
+            upload_type = str(
+                params.get("upload_type")
+                or (self.config.extra or {}).get("codex_proxy_upload_type")
+                or "at"
+            ).strip().lower()
+
+            if upload_type == "rt":
+                from platforms.chatgpt.cpa_upload import upload_to_codex_proxy
+
+                ok, msg = upload_to_codex_proxy(
+                    a,
+                    api_url=params.get("api_url"),
+                    api_key=params.get("api_key"),
+                )
+            else:
+                from platforms.chatgpt.cpa_upload import upload_at_to_codex_proxy
+
+                ok, msg = upload_at_to_codex_proxy(
+                    a,
+                    api_url=params.get("api_url"),
+                    api_key=params.get("api_key"),
+                )
             return {"ok": ok, "data": msg}
 
         raise NotImplementedError(f"未知操作: {action_id}")

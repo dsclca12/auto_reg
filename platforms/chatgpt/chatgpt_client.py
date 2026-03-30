@@ -823,7 +823,7 @@ class ChatGPTClient:
 
             if self._state_is_email_otp(state):
                 self._log("等待邮箱验证码...")
-                otp_code = skymail_client.wait_for_verification_code(email, timeout=30)
+                otp_code = skymail_client.wait_for_verification_code(email, timeout=90)
                 if not otp_code:
                     return False, "未收到验证码"
 

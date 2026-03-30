@@ -6,16 +6,34 @@ import time
 import threading
 import requests
 
-SOLVER_PORT = 8889
-SOLVER_URL = f"http://localhost:{SOLVER_PORT}"
 _proc: subprocess.Popen = None
 _log_file = None
 _lock = threading.Lock()
 
 
+def _solver_enabled() -> bool:
+    return os.getenv("APP_ENABLE_SOLVER", "1").lower() not in {"0", "false", "no"}
+
+
+def _solver_port() -> int:
+    return int(os.getenv("SOLVER_PORT", "8889"))
+
+
+def _solver_url() -> str:
+    return (os.getenv("LOCAL_SOLVER_URL") or f"http://127.0.0.1:{_solver_port()}").rstrip("/")
+
+
+def _solver_bind_host() -> str:
+    return os.getenv("SOLVER_BIND_HOST", "0.0.0.0")
+
+
+def _solver_browser_type() -> str:
+    return os.getenv("SOLVER_BROWSER_TYPE", "camoufox")
+
+
 def is_running() -> bool:
     try:
-        r = requests.get(f"{SOLVER_URL}/", timeout=2)
+        r = requests.get(f"{_solver_url()}/", timeout=2)
         return r.status_code < 500
     except Exception:
         return False
@@ -24,6 +42,9 @@ def is_running() -> bool:
 def start():
     global _proc, _log_file
     with _lock:
+        if not _solver_enabled():
+            print("[Solver] 已禁用，跳过自动启动")
+            return
         if is_running():
             print("[Solver] 已在运行")
             return
@@ -40,9 +61,11 @@ def start():
                 "-u",
                 solver_script,
                 "--browser_type",
-                "camoufox",
+                _solver_browser_type(),
+                "--host",
+                _solver_bind_host(),
                 "--port",
-                str(SOLVER_PORT),
+                str(_solver_port()),
             ],
             stdout=_log_file,
             stderr=subprocess.STDOUT,

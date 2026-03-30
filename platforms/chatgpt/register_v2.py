@@ -12,6 +12,7 @@ from core.base_platform import AccountStatus
 from platforms.chatgpt.register import RegistrationResult
 
 from .chatgpt_client import ChatGPTClient
+from .oauth_client import OAuthClient
 from .utils import generate_random_name, generate_random_birthday
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class RegistrationEngineV2:
         callback_logger: Optional[Callable[[str], None]] = None,
         task_uuid: Optional[str] = None,
         max_retries: int = 3,
+        extra_config: Optional[dict] = None,
     ):
         self.email_service = email_service
         self.proxy_url = proxy_url
@@ -53,6 +55,7 @@ class RegistrationEngineV2:
         self.callback_logger = callback_logger
         self.task_uuid = task_uuid
         self.max_retries = max(1, int(max_retries or 1))
+        self.extra_config = dict(extra_config or {})
         
         self.email = None
         self.password = None
@@ -68,6 +71,12 @@ class RegistrationEngineV2:
             logger.error(log_message)
         else:
             logger.info(log_message)
+
+    def _format_oauth_failure(self, oauth_client: OAuthClient) -> str:
+        detail = str(getattr(oauth_client, "last_error", "") or "").strip()
+        if not detail:
+            detail = "获取最终 OAuth Tokens 失败"
+        return f"账号已创建成功，但 {detail}"
 
     def _should_retry(self, message: str) -> bool:
         text = str(message or "").lower()
@@ -151,7 +160,7 @@ class RegistrationEngineV2:
                         result.error_message = last_error
                         return result
 
-                    self._log("步骤 2/2: 复用注册会话，直接获取 ChatGPT Session / AccessToken...")
+                    self._log("步骤 2/2: 优先复用注册会话提取 ChatGPT Session / AccessToken...")
                     session_ok, session_result = chatgpt_client.reuse_session_and_get_tokens()
 
                     if session_ok:
@@ -181,10 +190,66 @@ class RegistrationEngineV2:
                         self._log("=" * 60)
                         return result
 
-                    last_error = f"注册成功，但复用会话获取 AccessToken 失败: {session_result}"
-                    if attempt < self.max_retries - 1:
-                        self._log(f"{last_error}，准备整流程重试")
-                        continue
+                    self._log(f"复用会话失败，回退到 OAuth 登录补全流程: {session_result}")
+                    tokens = None
+                    oauth_client = None
+                    for oauth_attempt in range(2):
+                        if oauth_attempt > 0:
+                            self._log(f"同账号 OAuth 重试 {oauth_attempt + 1}/2 ...")
+                            time.sleep(1)
+
+                        oauth_client = OAuthClient(
+                            config=self.extra_config,
+                            proxy=self.proxy_url,
+                            verbose=False,
+                            browser_mode=self.browser_mode,
+                        )
+                        oauth_client._log = self._log
+                        oauth_client.session = chatgpt_client.session
+
+                        tokens = oauth_client.login_and_get_tokens(
+                            email_addr,
+                            pwd,
+                            chatgpt_client.device_id,
+                            chatgpt_client.ua,
+                            chatgpt_client.sec_ch_ua,
+                            chatgpt_client.impersonate,
+                            skymail_adapter,
+                        )
+                        if tokens and tokens.get("access_token"):
+                            break
+
+                        if oauth_client.last_error and "add_phone" in oauth_client.last_error:
+                            break
+
+                    if tokens and tokens.get("access_token"):
+                        self._log("OAuth 回退补全成功！")
+                        result.success = True
+                        result.access_token = tokens.get("access_token")
+                        result.refresh_token = tokens.get("refresh_token")
+                        result.id_token = tokens.get("id_token")
+                        result.account_id = "v2_acct_" + chatgpt_client.device_id[:8]
+
+                        session_data = oauth_client._decode_oauth_session_cookie()
+                        if session_data:
+                            workspaces = session_data.get("workspaces", [])
+                            if workspaces:
+                                result.workspace_id = str((workspaces[0] or {}).get("id") or "")
+                                self._log(f"成功萃取 Workspace ID: {result.workspace_id}")
+
+                        session_cookie = None
+                        for cookie in oauth_client.session.cookies.jar:
+                            if cookie.name == "__Secure-next-auth.session-token":
+                                session_cookie = cookie.value
+                                break
+                        result.session_token = session_cookie
+
+                        self._log("=" * 60)
+                        self._log("注册流程成功结束!")
+                        self._log("=" * 60)
+                        return result
+
+                    last_error = self._format_oauth_failure(oauth_client)
                     result.error_message = last_error
                     return result
                 except Exception as attempt_error:

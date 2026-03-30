@@ -53,3 +53,6 @@ data/
 .claude/
 .docs/superpowers/
 CLAUDE.md
+.ace-tool/
+smstome*_numbers.txt
+smstome_used/

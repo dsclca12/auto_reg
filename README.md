@@ -27,11 +27,11 @@
 
 项目支持按需安装/启动以下 3 个插件。当前代码里配置的 Git 地址如下：
 
-| 项目                   | 用途                         | Git 地址                                                   | 当前使用说明                             |
-| -------------------- | -------------------------- | -------------------------------------------------------- | ---------------------------------- |
-| CLIProxyAPI          | CPA / 代理池管理服务              | `https://github.com/router-for-me/CLIProxyAPI.git`       | 当前使用 **GitHub 直连地址**，未额外套 Git 镜像代理 |
-| grok2api             | Grok token 管理、回填、聊天/API 服务 | `https://github.com/chenyme/grok2api.git`                | 当前使用 **GitHub 直连地址**，未额外套 Git 镜像代理 |
-| kiro-account-manager | Kiro 账号管理相关插件              | `https://github.com/hj01857655/kiro-account-manager.git` | 当前使用 **GitHub 直连地址**，未额外套 Git 镜像代理 |
+| 项目                 | 用途                                 | Git 地址                                                   | 当前使用说明                                             |
+| -------------------- | ------------------------------------ | ---------------------------------------------------------- | -------------------------------------------------------- |
+| CLIProxyAPI          | CPA / 代理池管理服务                 | `https://github.com/router-for-me/CLIProxyAPI.git`       | 当前使用**GitHub 直连地址**，未额外套 Git 镜像代理 |
+| grok2api             | Grok token 管理、回填、聊天/API 服务 | `https://github.com/chenyme/grok2api.git`                | 当前使用**GitHub 直连地址**，未额外套 Git 镜像代理 |
+| kiro-account-manager | Kiro 账号管理相关插件                | `https://github.com/hj01857655/kiro-account-manager.git` | 当前使用**GitHub 直连地址**，未额外套 Git 镜像代理 |
 
 > 如果后续你要改成 `ghproxy`、`gitclone`、企业 Git 镜像或其他代理地址，需要同步修改：
 >
@@ -68,12 +68,12 @@
 
 ## 技术栈
 
-| 层级     | 技术                         |
-| ------ | -------------------------- |
-| 后端     | FastAPI + SQLite（SQLModel） |
-| 前端     | React + TypeScript + Vite  |
-| HTTP   | curl\_cffi                 |
-| 浏览器自动化 | Playwright / Camoufox      |
+| 层级         | 技术                         |
+| ------------ | ---------------------------- |
+| 后端         | FastAPI + SQLite（SQLModel） |
+| 前端         | React + TypeScript + Vite    |
+| HTTP         | curl\_cffi                   |
+| 浏览器自动化 | Playwright / Camoufox        |
 
 ## 环境要求
 
@@ -102,7 +102,7 @@ any-auto-register
 - `ModuleNotFoundError: quart`
 - 前端里 Turnstile Solver 一直显示“未运行”
 
-***
+---
 
 ## 安装
 
@@ -140,6 +140,89 @@ cd ..
 ```text
 D:\codemodule\ai\any-auto-register\static
 ```
+
+---
+
+## Docker 部署
+
+仓库根目录已提供：
+
+- `Dockerfile`
+- `docker-compose.yml`
+
+默认部署内容包括：
+
+- FastAPI 后端
+- 已构建的前端静态页
+- SQLite 数据库持久化目录 `./data`
+- 随后端自动拉起的本地 Turnstile Solver
+
+### 1. 启动
+
+```bash
+docker compose up -d --build
+```
+
+首次构建会额外下载 Python 依赖、Playwright Chromium 和 Camoufox，耗时会明显更长。
+
+当前 Dockerfile 已改为通过固定直链安装 Camoufox，避免构建时访问 GitHub Releases API 触发匿名限流。
+
+### 2. 访问
+
+```text
+http://localhost:8000
+```
+
+### 3. 停止
+
+```bash
+docker compose down
+```
+
+### 4. 查看日志
+
+```bash
+docker compose logs -f app
+```
+
+### 5. 数据持久化
+
+容器默认使用：
+
+```text
+DATABASE_URL=sqlite:////app/data/account_manager.db
+```
+
+宿主机会挂载到：
+
+```text
+./data
+```
+
+### 6. 常用环境变量
+
+| 变量名 | 默认值 | 说明 |
+| --- | --- | --- |
+| `HOST` | `0.0.0.0` | FastAPI 监听地址 |
+| `PORT` | `8000` | FastAPI 监听端口 |
+| `DATABASE_URL` | `sqlite:////app/data/account_manager.db` | SQLite 数据库地址 |
+| `APP_ENABLE_SOLVER` | `1` | 是否自动启动本地 Solver，设为 `0` 可禁用 |
+| `SOLVER_PORT` | `8889` | Solver 监听端口 |
+| `LOCAL_SOLVER_URL` | `http://127.0.0.1:8889` | 后端访问 Solver 的地址 |
+
+### 7. Camoufox 构建参数
+
+如果后续上游 Camoufox 版本有变，可以在构建时覆盖：
+
+```bash
+CAMOUFOX_VERSION=135.0.1 CAMOUFOX_RELEASE=beta.24 docker compose build app
+```
+
+### 8. Docker 部署说明
+
+- 当前 Docker 镜像主要覆盖主应用和本地 Turnstile Solver。
+- `grok2api`、`CLIProxyAPI`、`Kiro Account Manager` 的自动安装/拉起逻辑仍偏向宿主机环境，尤其依赖 `conda`、Go、Windows 可执行文件时，不建议直接放进当前 Linux 容器里启动。
+- 如果你只需要 Web UI、账号管理、任务调度和本地 Solver，当前 Compose 配置可以直接使用。
 
 ***
 
@@ -181,6 +264,36 @@ http://localhost:8000
 
 > 注意：生产/本地构建模式下，前端由 FastAPI 直接托管，访问的是 `8000`，不是 `5173`。
 
+### Docker 启动
+
+如果你只想快速拉起整个项目，可以直接使用仓库根目录的 `Dockerfile` 和 `docker-compose.yml`：
+
+```bash
+docker compose up --build -d
+```
+
+默认会暴露：
+
+- Web UI / API：`http://localhost:8000`
+- Turnstile Solver：`http://localhost:8889`
+
+容器内仍然沿用“后端自动拉起本地 Solver”的方式，但 `docker-compose.yml` 默认把 Solver 浏览器切到 `chromium`，避免额外依赖本机 conda/camoufox 环境。
+
+运行时数据会持久化到 compose volume 中，包括：
+
+- SQLite 数据库 `account_manager.db`
+- `smstome_used/` 里的已用号 / 黑名单
+- `smstome_all_numbers.txt`
+
+如果需要传入 `SMSTOME_COOKIE`、`OPENAI_*` 等配置，直接写在仓库根目录 `.env` 即可；`docker compose` 会把它们注入到容器环境中。
+
+常用命令：
+
+```bash
+docker compose logs -f
+docker compose down
+```
+
 ### 停止后端
 
 #### PowerShell
@@ -200,7 +313,7 @@ stop_backend.bat
 - 后端端口：`8000`
 - Solver 端口：`8889`
 
-***
+---
 
 ## 前端开发模式
 
@@ -227,7 +340,7 @@ http://localhost:5173
 
 Vite 会把 `/api` 代理到本地后端 `http://localhost:8000`。
 
-***
+---
 
 ## Turnstile Solver 说明
 
@@ -261,7 +374,7 @@ python services/turnstile_solver/start.py --browser_type camoufox --port 8889
 D:\codemodule\ai\any-auto-register\services\turnstile_solver\solver.log
 ```
 
-***
+---
 
 ## 常见问题排查
 
@@ -334,7 +447,7 @@ http://localhost:8889/
 .\start_backend.ps1
 ```
 
-***
+---
 
 ## 邮箱服务配置
 
@@ -367,35 +480,35 @@ http://localhost:8889/
 
 适合固定邮箱场景。
 
-| 参数         | 说明       |
-| ---------- | -------- |
-| 邮箱地址       | 完整邮箱地址   |
-| Account ID | 邮箱账号 ID  |
+| 参数       | 说明             |
+| ---------- | ---------------- |
+| 邮箱地址   | 完整邮箱地址     |
+| Account ID | 邮箱账号 ID      |
 | JWT Token  | 登录后的认证令牌 |
 
 ### Cloudflare Worker 自建邮箱
 
-| 参数          | 说明            |
-| ----------- | ------------- |
-| API URL     | Worker API 地址 |
-| Admin Token | 管理员密码         |
-| 域名          | 收件邮箱域名        |
-| Fingerprint | 可选            |
+| 参数        | 说明                                                                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| API URL     | Worker API 地址（注意这是填写[cloudflare workers后端地址](https://temp-mail-docs.awsl.uk/zh/guide/ui/worker.html) !!不是pages前端地址） |
+| Admin Token | 管理员密码                                                                                                                            |
+| 域名        | 收件邮箱域名                                                                                                                          |
+| Fingerprint | 可选                                                                                                                                  |
 
 ### DuckMail / Freemail
 
 适合临时邮箱场景，部分区域可能需要代理。
 
-***
+---
 
 ## 验证码服务配置
 
-| 服务         | 说明                                           |
-| ---------- | -------------------------------------------- |
-| YesCaptcha | 需填写 Client Key                               |
-| 本地 Solver  | 依赖 `camoufox` + `quart`，并要求后端运行在正确 conda 环境中 |
+| 服务        | 说明                                                             |
+| ----------- | ---------------------------------------------------------------- |
+| YesCaptcha  | 需填写 Client Key                                                |
+| 本地 Solver | 依赖 `camoufox` + `quart`，并要求后端运行在正确 conda 环境中 |
 
-***
+---
 
 ## 项目结构
 
@@ -415,7 +528,7 @@ any-auto-register/
 └── static/
 ```
 
-***
+---
 
 ## Electron 开发说明
 
@@ -429,7 +542,7 @@ Electron 开发模式不会自动启动 Python 后端。
 
 然后再运行 Electron。
 
-***
+---
 
 ## License
 
