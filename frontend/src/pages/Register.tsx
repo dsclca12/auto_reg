@@ -49,7 +49,7 @@ export default function Register() {
         cfworker_api_url: cfg.cfworker_api_url || '',
         cfworker_admin_token: cfg.cfworker_admin_token || '',
         cfworker_custom_auth: cfg.cfworker_custom_auth || '',
-        cfworker_domain: cfg.cfworker_domain || '',
+        cfworker_domain_override: '',
         cfworker_fingerprint: cfg.cfworker_fingerprint || '',
         smstome_cookie: cfg.smstome_cookie || '',
         smstome_country_slugs: cfg.smstome_country_slugs || '',
@@ -94,7 +94,7 @@ export default function Register() {
           cfworker_api_url: values.cfworker_api_url,
           cfworker_admin_token: values.cfworker_admin_token,
           cfworker_custom_auth: values.cfworker_custom_auth,
-          cfworker_domain: values.cfworker_domain,
+          cfworker_domain_override: values.cfworker_domain_override,
           cfworker_fingerprint: values.cfworker_fingerprint,
           smstome_cookie: values.smstome_cookie,
           smstome_country_slugs: values.smstome_country_slugs,
@@ -238,7 +238,11 @@ export default function Register() {
               <Form.Item name="cfworker_custom_auth" label="Site Password">
                 <Input.Password placeholder="private site password" />
               </Form.Item>
-              <Form.Item name="cfworker_domain" label="域名">
+              <Form.Item
+                name="cfworker_domain_override"
+                label="单次任务指定域名（可选）"
+                extra="留空时将从设置页已启用的域名列表中随机选择。"
+              >
                 <Input placeholder="example.com" />
               </Form.Item>
               <Form.Item name="cfworker_fingerprint" label="Fingerprint (可选)">

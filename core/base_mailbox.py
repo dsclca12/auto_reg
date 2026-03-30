@@ -1,5 +1,6 @@
 """邮箱池基类 - 抽象临时邮箱/收件服务"""
 import json
+import random
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -117,6 +118,9 @@ def create_mailbox(provider: str, extra: dict = None, proxy: str = None) -> 'Bas
             api_url=extra.get("cfworker_api_url", ""),
             admin_token=extra.get("cfworker_admin_token", ""),
             domain=extra.get("cfworker_domain", ""),
+            domain_override=extra.get("cfworker_domain_override", ""),
+            domains=extra.get("cfworker_domains", ""),
+            enabled_domains=extra.get("cfworker_enabled_domains", ""),
             fingerprint=extra.get("cfworker_fingerprint", ""),
             custom_auth=extra.get("cfworker_custom_auth", ""),
             proxy=proxy,
@@ -411,10 +415,20 @@ class CFWorkerMailbox(BaseMailbox):
     """Cloudflare Worker 自建临时邮箱服务"""
 
     def __init__(self, api_url: str, admin_token: str = "", domain: str = "",
-                 fingerprint: str = "", custom_auth: str = "", proxy: str = None):
+                 domain_override: str = "", domains: Any = None,
+                 enabled_domains: Any = None, fingerprint: str = "",
+                 custom_auth: str = "", proxy: str = None):
         self.api = api_url.rstrip("/")
         self.admin_token = admin_token
-        self.domain = domain
+        self.domain = self._normalize_domain(domain)
+        self.domain_override = self._normalize_domain(domain_override)
+        self.domains = self._parse_domains(domains)
+        raw_enabled_domains = self._parse_domains(enabled_domains)
+        if self.domains:
+            allowed = set(self.domains)
+            self.enabled_domains = [d for d in raw_enabled_domains if d in allowed]
+        else:
+            self.enabled_domains = raw_enabled_domains
         self.fingerprint = fingerprint
         self.custom_auth = custom_auth
         self.proxy = {"http": proxy, "https": proxy} if proxy else None
@@ -479,18 +493,67 @@ class CFWorkerMailbox(BaseMailbox):
             ) from e
 
     def _generate_local_part(self) -> str:
-        import random, string
+        import string
         # 避免纯数字开头，提高邮箱格式“像真人”的程度
         prefix = "".join(random.choices(string.ascii_lowercase, k=6))
         suffix = "".join(random.choices(string.digits, k=4))
         return f"{prefix}{suffix}"
 
+    @staticmethod
+    def _normalize_domain(domain: Any) -> str:
+        value = str(domain or "").strip().lower()
+        if value.startswith("@"):
+            value = value[1:]
+        return value
+
+    @classmethod
+    def _parse_domains(cls, value: Any) -> list[str]:
+        if not value:
+            return []
+
+        items: list[Any]
+        if isinstance(value, (list, tuple, set)):
+            items = list(value)
+        elif isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return []
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, list):
+                items = parsed
+            else:
+                items = [part for chunk in text.splitlines() for part in chunk.split(",")]
+        else:
+            items = [value]
+
+        domains: list[str] = []
+        seen = set()
+        for item in items:
+            domain = cls._normalize_domain(item)
+            if not domain or domain in seen:
+                continue
+            seen.add(domain)
+            domains.append(domain)
+        return domains
+
+    def _pick_domain(self) -> str:
+        if self.domain_override:
+            return self.domain_override
+        if self.enabled_domains:
+            return random.choice(self.enabled_domains)
+        return self.domain
+
     def get_email(self) -> MailboxAccount:
         self._ensure_api_configured()
         name = self._generate_local_part()
         payload = {"enablePrefix": True, "name": name}
-        if self.domain:
-            payload["domain"] = self.domain
+        selected_domain = self._pick_domain()
+        if selected_domain:
+            payload["domain"] = selected_domain
+            self._log(f"[CFWorker] 本次使用域名: {selected_domain}")
         data = self._request_json("POST", "/admin/new_address", payload=payload, timeout=15)
         email = data.get("email", data.get("address", ""))
         token = data.get("token", data.get("jwt", ""))
@@ -498,7 +561,11 @@ class CFWorkerMailbox(BaseMailbox):
             raise RuntimeError(f"CFWorker API /admin/new_address 返回缺少 email/jwt: {data}")
         self._token = token
         print(f"[CFWorker] 生成邮箱: {email} token={token[:40] if token else 'NONE'}...")
-        return MailboxAccount(email=email, account_id=token)
+        return MailboxAccount(
+            email=email,
+            account_id=token,
+            extra={"cfworker_domain": selected_domain} if selected_domain else None,
+        )
 
     def _get_mails(self, email: str) -> list:
         self._ensure_api_configured()
