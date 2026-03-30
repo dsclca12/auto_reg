@@ -14,6 +14,7 @@ import {
   Popconfirm,
   Dropdown,
   Typography,
+  Alert,
 } from 'antd'
 import type { MenuProps } from 'antd'
 import {
@@ -119,6 +120,11 @@ function LogPanel({ taskId, onDone }: { taskId: string; onDone: () => void }) {
 
 function ActionMenu({ acc, onRefresh }: { acc: any; onRefresh: () => void }) {
   const [actions, setActions] = useState<any[]>([])
+  const [resultOpen, setResultOpen] = useState(false)
+  const [resultTitle, setResultTitle] = useState('')
+  const [resultStatus, setResultStatus] = useState<'success' | 'error'>('success')
+  const [resultText, setResultText] = useState('')
+  const [resultUrl, setResultUrl] = useState('')
 
   useEffect(() => {
     apiFetch(`/actions/${acc.platform}`)
@@ -126,40 +132,129 @@ function ActionMenu({ acc, onRefresh }: { acc: any; onRefresh: () => void }) {
       .catch(() => {})
   }, [acc.platform])
 
+  const showResult = (title: string, status: 'success' | 'error', text: string, url = '') => {
+    setResultTitle(title)
+    setResultStatus(status)
+    setResultText(text)
+    setResultUrl(url)
+    setResultOpen(true)
+  }
+
+  const copyResultUrl = async () => {
+    if (!resultUrl) return
+    try {
+      await navigator.clipboard.writeText(resultUrl)
+      message.success('链接已复制')
+    } catch {
+      message.error('复制失败')
+    }
+  }
+
   const handleAction = async (actionId: string) => {
+    const actionLabel = actions.find((item) => item.id === actionId)?.label || actionId
+
     try {
       const r = await apiFetch(`/actions/${acc.platform}/${acc.id}/${actionId}`, {
         method: 'POST',
         body: JSON.stringify({ params: {} }),
       })
       if (!r.ok) {
-        message.error(r.error || '操作失败')
+        showResult(actionLabel, 'error', r.error || '操作失败')
         return
       }
       const data = r.data || {}
       if (data.url || data.checkout_url || data.cashier_url) {
-        window.open(data.url || data.checkout_url || data.cashier_url, '_blank')
+        const targetUrl = data.url || data.checkout_url || data.cashier_url
+        message.success('链接已生成')
+        showResult(actionLabel, 'success', '操作成功，请在弹窗中打开或复制链接。', targetUrl)
       } else {
         message.success(data.message || '操作成功')
+        const text =
+          typeof data === 'string'
+            ? data
+            : Object.keys(data).length > 0
+              ? JSON.stringify(data, null, 2)
+              : '操作成功'
+        showResult(actionLabel, 'success', text)
       }
       onRefresh()
-    } catch {
-      message.error('请求失败')
+    } catch (e: any) {
+      const detail = e?.message ? String(e.message) : '请求失败'
+      message.error(detail)
+      showResult(actionLabel, 'error', detail)
     }
   }
 
   const menuItems: MenuProps['items'] = actions.map((a) => ({
     key: a.id,
     label: a.label,
-    onClick: () => handleAction(a.id),
   }))
 
   if (actions.length === 0) return null
 
   return (
-    <Dropdown menu={{ items: menuItems }}>
-      <Button type="link" size="small" icon={<MoreOutlined />} />
-    </Dropdown>
+    <>
+      <Dropdown
+        menu={{
+          items: menuItems,
+          onClick: ({ key }) => handleAction(String(key)),
+        }}
+      >
+        <Button type="link" size="small" icon={<MoreOutlined />} />
+      </Dropdown>
+      <Modal
+        title={resultTitle}
+        open={resultOpen}
+        onCancel={() => setResultOpen(false)}
+        footer={[
+          resultUrl ? (
+            <Button key="copy" onClick={copyResultUrl}>
+              复制链接
+            </Button>
+          ) : null,
+          resultUrl ? (
+            <Button
+              key="open"
+              type="primary"
+              onClick={() => window.open(resultUrl, '_blank', 'noopener,noreferrer')}
+            >
+              打开链接
+            </Button>
+          ) : null,
+          <Button key="ok" type={resultUrl ? 'default' : 'primary'} onClick={() => setResultOpen(false)}>
+            确定
+          </Button>,
+        ].filter(Boolean)}
+        maskClosable={false}
+      >
+        <Alert
+          type={resultStatus}
+          showIcon
+          message={resultStatus === 'success' ? '操作完成' : '操作失败'}
+          style={{ marginBottom: 12 }}
+        />
+        {resultUrl ? (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Text copyable={{ text: resultUrl }} style={{ wordBreak: 'break-all' }}>
+              {resultUrl}
+            </Text>
+          </Space>
+        ) : null}
+        {resultText ? (
+          <pre
+            style={{
+              margin: 0,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontFamily: 'monospace',
+              fontSize: 12,
+            }}
+          >
+            {resultText}
+          </pre>
+        ) : null}
+      </Modal>
+    </>
   )
 }
 

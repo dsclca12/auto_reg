@@ -195,7 +195,14 @@ class ChatGPTPlatform(BasePlatform):
             if plan == "plus":
                 url = generate_plus_link(a, proxy=proxy, country=country)
             else:
-                url = generate_team_link(a, proxy=proxy, country=country)
+                url = generate_team_link(
+                    a,
+                    workspace_name=params.get("workspace_name", "MyTeam"),
+                    price_interval=params.get("price_interval", "month"),
+                    seat_quantity=int(params.get("seat_quantity", 5) or 5),
+                    proxy=proxy,
+                    country=country,
+                )
             return {"ok": bool(url), "data": {"url": url}}
 
         elif action_id == "upload_cpa":
