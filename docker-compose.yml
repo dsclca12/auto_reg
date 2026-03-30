@@ -1,0 +1,26 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: any-auto-register
+    init: true
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8000"
+      APP_RELOAD: "0"
+      APP_CONDA_ENV: docker
+      APP_RUNTIME_DIR: /runtime
+      SOLVER_PORT: "8889"
+      SOLVER_BROWSER_TYPE: chromium
+    ports:
+      - "8000:8000"
+      - "8889:8889"
+    volumes:
+      - app_runtime:/runtime
+
+volumes:
+  app_runtime:
