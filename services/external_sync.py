@@ -21,6 +21,27 @@ def sync_account(account) -> list[dict[str, Any]]:
             persist_cpa_sync_result(account, ok, msg)
             results.append({"name": "CPA", "ok": ok, "msg": msg})
 
+        codex_proxy_url = str(config_store.get("codex_proxy_url", "") or "").strip()
+        if codex_proxy_url:
+            upload_type = str(config_store.get("codex_proxy_upload_type", "at") or "at").strip().lower()
+            extra = account.extra or {}
+
+            class _CP:
+                pass
+
+            cp = _CP()
+            cp.access_token = extra.get("access_token") or account.token
+            cp.refresh_token = extra.get("refresh_token", "")
+
+            if upload_type == "rt":
+                from platforms.chatgpt.cpa_upload import upload_to_codex_proxy
+                ok, msg = upload_to_codex_proxy(cp)
+                results.append({"name": "CodexProxy(RT)", "ok": ok, "msg": msg})
+            else:
+                from platforms.chatgpt.cpa_upload import upload_at_to_codex_proxy
+                ok, msg = upload_at_to_codex_proxy(cp)
+                results.append({"name": "CodexProxy(AT)", "ok": ok, "msg": msg})
+
     elif platform == "grok":
         grok2api_url = str(config_store.get("grok2api_url", "") or "").strip()
         if grok2api_url:

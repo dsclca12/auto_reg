@@ -113,6 +113,14 @@ def create_mailbox(provider: str, extra: dict = None, proxy: str = None) -> 'Bas
             api_url=extra.get("moemail_api_url", "https://sall.cc"),
             proxy=proxy,
         )
+    elif provider == "maliapi":
+        return MaliAPIMailbox(
+            api_url=extra.get("maliapi_base_url", "https://maliapi.215.im/v1"),
+            api_key=extra.get("maliapi_api_key", ""),
+            domain=extra.get("maliapi_domain", ""),
+            auto_domain_strategy=extra.get("maliapi_auto_domain_strategy", ""),
+            proxy=proxy,
+        )
     elif provider == "cfworker":
         return CFWorkerMailbox(
             api_url=extra.get("cfworker_api_url", ""),
@@ -405,6 +413,188 @@ class DuckMailMailbox(BaseMailbox):
                     body = re.sub(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '', body)
                     code = self._safe_extract(body, code_pattern)
                     if code: return code
+            except Exception:
+                pass
+            time.sleep(3)
+        raise TimeoutError(f"等待验证码超时 ({timeout}s)")
+
+
+class MaliAPIMailbox(BaseMailbox):
+    """YYDS Mail / MaliAPI 临时邮箱服务"""
+
+    def __init__(
+        self,
+        api_url: str = "https://maliapi.215.im/v1",
+        api_key: str = "",
+        domain: str = "",
+        auto_domain_strategy: str = "",
+        proxy: str = None,
+    ):
+        self.api = (api_url or "https://maliapi.215.im/v1").rstrip("/")
+        self.api_key = str(api_key or "").strip()
+        self.domain = str(domain or "").strip()
+        self.auto_domain_strategy = str(auto_domain_strategy or "").strip()
+        self.proxy = {"http": proxy, "https": proxy} if proxy else None
+        self._email = None
+        self._temp_token = None
+
+    def _headers(self, bearer: str = "") -> dict[str, str]:
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+        }
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+        return headers
+
+    def _request(self, method: str, path: str, *, json_body: dict = None,
+                 params: dict = None, bearer: str = "") -> Any:
+        import requests
+
+        response = requests.request(
+            method,
+            f"{self.api}{path}",
+            headers=self._headers(bearer),
+            json=json_body,
+            params=params,
+            proxies=self.proxy,
+            timeout=15,
+        )
+        try:
+            payload = response.json()
+        except Exception:
+            payload = {}
+
+        if response.status_code >= 400:
+            error = response.text or f"HTTP {response.status_code}"
+            error_code = ""
+            if isinstance(payload, dict):
+                error = str(payload.get("error") or error).strip()
+                error_code = str(payload.get("errorCode") or "").strip()
+            if error_code:
+                raise RuntimeError(f"MaliAPI 请求失败: {error} ({error_code})")
+            raise RuntimeError(f"MaliAPI 请求失败: {str(error).strip()}")
+
+        if isinstance(payload, dict):
+            if payload.get("success") is False:
+                error = str(payload.get("error") or "unknown error").strip()
+                error_code = str(payload.get("errorCode") or "").strip()
+                if error_code:
+                    raise RuntimeError(f"MaliAPI 请求失败: {error} ({error_code})")
+                raise RuntimeError(f"MaliAPI 请求失败: {error}")
+            if "data" in payload:
+                return payload.get("data")
+        return payload
+
+    def _ensure_api_key(self) -> None:
+        if not self.api_key:
+            raise RuntimeError("MaliAPI 未配置：请在全局设置中填写 maliapi_api_key")
+
+    def _list_messages(self, account: MailboxAccount) -> list[dict]:
+        data = self._request("GET", "/messages", params={"address": account.email})
+        if isinstance(data, dict):
+            messages = data.get("messages", [])
+        else:
+            messages = data
+        return [item for item in (messages or []) if isinstance(item, dict)]
+
+    def _get_message_detail(self, message_id: str) -> dict:
+        data = self._request("GET", f"/messages/{message_id}")
+        if isinstance(data, dict) and isinstance(data.get("message"), dict):
+            return data["message"]
+        return data if isinstance(data, dict) else {}
+
+    def get_email(self) -> MailboxAccount:
+        self._ensure_api_key()
+        body = {}
+        if self.domain:
+            body["domain"] = self.domain
+        if self.auto_domain_strategy:
+            body["autoDomainStrategy"] = self.auto_domain_strategy
+
+        data = self._request("POST", "/accounts", json_body=body)
+        if not isinstance(data, dict):
+            raise RuntimeError(f"MaliAPI 返回异常: {data}")
+
+        email = str(data.get("address") or data.get("email") or "").strip()
+        temp_token = str(
+            data.get("tempToken")
+            or data.get("temp_token")
+            or data.get("token")
+            or ""
+        ).strip()
+        inbox_id = str(data.get("id") or "").strip()
+        if not email:
+            raise RuntimeError(f"MaliAPI 返回空邮箱: {data}")
+
+        self._email = email
+        self._temp_token = temp_token
+        self._log(f"[MaliAPI] 生成邮箱: {email}")
+        return MailboxAccount(
+            email=email,
+            account_id=temp_token or inbox_id or email,
+            extra={
+                "provider": "maliapi",
+                "temp_token": temp_token,
+                "inbox_id": inbox_id,
+            },
+        )
+
+    def get_current_ids(self, account: MailboxAccount) -> set:
+        self._ensure_api_key()
+        try:
+            return {
+                str(message.get("id"))
+                for message in self._list_messages(account)
+                if message.get("id") is not None
+            }
+        except Exception:
+            return set()
+
+    def wait_for_code(self, account: MailboxAccount, keyword: str = "",
+                      timeout: int = 120, before_ids: set = None,
+                      code_pattern: str = None, **kwargs) -> str:
+        import re
+        import time
+
+        self._ensure_api_key()
+        seen = {str(mid) for mid in (before_ids or set())}
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                for message in self._list_messages(account):
+                    message_id = str(message.get("id") or "").strip()
+                    if not message_id or message_id in seen:
+                        continue
+                    seen.add(message_id)
+
+                    try:
+                        detail = self._get_message_detail(message_id)
+                    except Exception:
+                        detail = message
+
+                    search_text = " ".join([
+                        str(detail.get("subject") or message.get("subject") or ""),
+                        str(detail.get("text") or ""),
+                        str(detail.get("html") or ""),
+                        str(message.get("subject") or ""),
+                        str(message.get("snippet") or ""),
+                    ]).strip()
+                    search_text = self._decode_raw_content(search_text) or search_text
+                    search_text = re.sub(
+                        r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+                        "",
+                        search_text,
+                    )
+                    if keyword and keyword.lower() not in search_text.lower():
+                        continue
+
+                    code = self._safe_extract(search_text, code_pattern)
+                    if code:
+                        self._log(f"[MaliAPI] 收到验证码: {code}")
+                        return code
             except Exception:
                 pass
             time.sleep(3)

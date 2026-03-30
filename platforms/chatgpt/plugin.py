@@ -163,6 +163,11 @@ class ChatGPTPlatform(BasePlatform):
                  {"key": "api_url", "label": "TM API URL", "type": "text"},
                  {"key": "api_key", "label": "TM API Key", "type": "text"},
              ]},
+            {"id": "upload_codex_proxy", "label": "上传 CodexProxy",
+             "params": [
+                 {"key": "api_url", "label": "API URL", "type": "text"},
+                 {"key": "api_key", "label": "Admin Key", "type": "text"},
+             ]},
         ]
 
     def execute_action(self, action_id: str, account: Account, params: dict) -> dict:
@@ -216,6 +221,12 @@ class ChatGPTPlatform(BasePlatform):
             from platforms.chatgpt.cpa_upload import upload_to_team_manager
             ok, msg = upload_to_team_manager(a, api_url=params.get("api_url"),
                                              api_key=params.get("api_key"))
+            return {"ok": ok, "data": msg}
+
+        elif action_id == "upload_codex_proxy":
+            from platforms.chatgpt.cpa_upload import upload_to_codex_proxy
+            ok, msg = upload_to_codex_proxy(a, api_url=params.get("api_url"),
+                                            api_key=params.get("api_key"))
             return {"ok": ok, "data": msg}
 
         raise NotImplementedError(f"未知操作: {action_id}")

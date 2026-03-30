@@ -333,6 +333,15 @@ export default function Accounts() {
     message.success('已复制')
   }
 
+  const getRefreshToken = (record: any): string => {
+    try {
+      const extra = JSON.parse(record.extra_json || '{}')
+      return extra.refresh_token || ''
+    } catch {
+      return ''
+    }
+  }
+
   const exportCsv = () => {
     const header = 'email,password,status,region,cashier_url,created_at'
     const rows = accounts.map((a) => [a.email, a.password, a.status, a.region, a.cashier_url, a.created_at].join(','))
@@ -415,6 +424,10 @@ export default function Accounts() {
             laoudo_auth: cfg.laoudo_auth,
             laoudo_email: cfg.laoudo_email,
             laoudo_account_id: cfg.laoudo_account_id,
+            maliapi_base_url: cfg.maliapi_base_url,
+            maliapi_api_key: cfg.maliapi_api_key,
+            maliapi_domain: cfg.maliapi_domain,
+            maliapi_auto_domain_strategy: cfg.maliapi_auto_domain_strategy,
             yescaptcha_key: cfg.yescaptcha_key,
             moemail_api_url: cfg.moemail_api_url,
             duckmail_address: cfg.duckmail_address,
@@ -568,6 +581,22 @@ export default function Accounts() {
           <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => copyText(text)} />
         </Space>
       ),
+    },
+    {
+      title: 'RT',
+      key: 'refresh_token',
+      render: (_: any, record: any) => {
+        const rt = getRefreshToken(record)
+        if (!rt) return <span style={{ color: '#ccc' }}>-</span>
+        return (
+          <Space>
+            <Text style={{ fontFamily: 'monospace', fontSize: 11, filter: 'blur(4px)', maxWidth: 80, overflow: 'hidden', display: 'inline-block', verticalAlign: 'middle' }}>
+              {rt.slice(0, 16)}
+            </Text>
+            <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => copyText(rt)} />
+          </Space>
+        )
+      },
     },
     {
       title: '状态',
@@ -820,22 +849,41 @@ export default function Accounts() {
         maskClosable={false}
       >
         {currentAccount && (
-          <Form form={detailForm} layout="vertical" initialValues={currentAccount}>
-            <Form.Item name="status" label="状态">
-              <Select
-                options={[
-                  { value: 'registered', label: '已注册' },
-                  { value: 'trial', label: '试用中' },
-                  { value: 'subscribed', label: '已订阅' },
-                  { value: 'expired', label: '已过期' },
-                  { value: 'invalid', label: '已失效' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item name="token" label="Token">
-              <Input.TextArea rows={2} style={{ fontFamily: 'monospace' }} />
-            </Form.Item>
-          </Form>
+          <>
+            <Form form={detailForm} layout="vertical" initialValues={currentAccount}>
+              <Form.Item name="status" label="状态">
+                <Select
+                  options={[
+                    { value: 'registered', label: '已注册' },
+                    { value: 'trial', label: '试用中' },
+                    { value: 'subscribed', label: '已订阅' },
+                    { value: 'expired', label: '已过期' },
+                    { value: 'invalid', label: '已失效' },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item name="token" label="Access Token">
+                <Input.TextArea rows={2} style={{ fontFamily: 'monospace' }} />
+              </Form.Item>
+            </Form>
+            {(() => {
+              const rt = getRefreshToken(currentAccount)
+              if (!rt) return null
+              return (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ marginBottom: 4, fontWeight: 500, fontSize: 13 }}>Refresh Token</div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: 'rgba(0,0,0,0.03)', border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 10px' }}>
+                    <Text
+                      style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', flex: 1, userSelect: 'text' }}
+                      copyable={{ text: rt, tooltips: ['复制 RT', '已复制'] }}
+                    >
+                      {rt}
+                    </Text>
+                  </div>
+                </div>
+              )
+            })()}
+          </>
         )}
       </Modal>
     </div>

@@ -39,6 +39,10 @@ export default function Register() {
         laoudo_auth: cfg.laoudo_auth || '',
         laoudo_email: cfg.laoudo_email || '',
         laoudo_account_id: cfg.laoudo_account_id || '',
+        maliapi_base_url: cfg.maliapi_base_url || 'https://maliapi.215.im/v1',
+        maliapi_api_key: cfg.maliapi_api_key || '',
+        maliapi_domain: cfg.maliapi_domain || '',
+        maliapi_auto_domain_strategy: cfg.maliapi_auto_domain_strategy || 'balanced',
         duckmail_api_url: cfg.duckmail_api_url || '',
         duckmail_provider_url: cfg.duckmail_provider_url || '',
         duckmail_bearer: cfg.duckmail_bearer || '',
@@ -83,6 +87,10 @@ export default function Register() {
           laoudo_auth: values.laoudo_auth,
           laoudo_email: values.laoudo_email,
           laoudo_account_id: values.laoudo_account_id,
+          maliapi_base_url: values.maliapi_base_url,
+          maliapi_api_key: values.maliapi_api_key,
+          maliapi_domain: values.maliapi_domain,
+          maliapi_auto_domain_strategy: values.maliapi_auto_domain_strategy,
           moemail_api_url: values.moemail_api_url,
           duckmail_api_url: values.duckmail_api_url,
           duckmail_provider_url: values.duckmail_provider_url,
@@ -157,6 +165,8 @@ export default function Register() {
         mail_provider: 'moemail',
         count: 1,
         register_delay_seconds: 0,
+        maliapi_base_url: 'https://maliapi.215.im/v1',
+        maliapi_auto_domain_strategy: 'balanced',
         solver_url: 'http://localhost:8889',
       }}>
         <Card title="基本配置" style={{ marginBottom: 16 }}>
@@ -206,6 +216,7 @@ export default function Register() {
               options={[
                 { value: 'moemail', label: 'MoeMail (sall.cc)' },
                 { value: 'tempmail_lol', label: 'TempMail.lol' },
+                { value: 'maliapi', label: 'YYDS Mail / MaliAPI' },
                 { value: 'duckmail', label: 'DuckMail' },
                 { value: 'freemail', label: 'Freemail' },
                 { value: 'laoudo', label: 'Laoudo' },
@@ -224,6 +235,28 @@ export default function Register() {
               </Form.Item>
               <Form.Item name="laoudo_auth" label="JWT Token">
                 <Input placeholder="eyJ..." />
+              </Form.Item>
+            </>
+          )}
+          {mailProvider === 'maliapi' && (
+            <>
+              <Form.Item name="maliapi_base_url" label="API URL">
+                <Input placeholder="https://maliapi.215.im/v1" />
+              </Form.Item>
+              <Form.Item name="maliapi_api_key" label="API Key">
+                <Input.Password placeholder="AC-..." />
+              </Form.Item>
+              <Form.Item name="maliapi_domain" label="邮箱域名（可选）">
+                <Input placeholder="example.com" />
+              </Form.Item>
+              <Form.Item name="maliapi_auto_domain_strategy" label="自动域名策略">
+                <Select
+                  options={[
+                    { value: 'balanced', label: 'balanced' },
+                    { value: 'prefer_owned', label: 'prefer_owned' },
+                    { value: 'prefer_public', label: 'prefer_public' },
+                  ]}
+                />
               </Form.Item>
             </>
           )}
