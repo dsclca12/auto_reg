@@ -92,6 +92,13 @@ def create_mailbox(provider: str, extra: dict = None, proxy: str = None) -> 'Bas
     extra = extra or {}
     if provider == "tempmail_lol":
         return TempMailLolMailbox(proxy=proxy)
+    elif provider == "skymail":
+        return SkyMailMailbox(
+            api_base=extra.get("skymail_api_base", "https://api.skymail.ink"),
+            auth_token=extra.get("skymail_token", ""),
+            domain=extra.get("skymail_domain", ""),
+            proxy=proxy,
+        )
     elif provider == "duckmail":
         return DuckMailMailbox(
             api_url=extra.get("duckmail_api_url", "https://www.duckmail.sbs"),
@@ -317,6 +324,153 @@ class TempMailLolMailbox(BaseMailbox):
             except Exception:
                 pass
             time.sleep(3)
+        raise TimeoutError(f"等待验证码超时 ({timeout}s)")
+
+
+class SkyMailMailbox(BaseMailbox):
+    """SkyMail / CloudMail 自建邮箱服务"""
+
+    def __init__(self, api_base: str, auth_token: str, domain: str, proxy: str = None):
+        self.api = (api_base or "").rstrip("/")
+        self.auth_token = auth_token or ""
+        self.domain = domain or ""
+        self.proxy = {"http": proxy, "https": proxy} if proxy else None
+
+    def _headers(self) -> dict:
+        return {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "authorization": self.auth_token,
+        }
+
+    def _ensure_config(self) -> None:
+        if not self.api or not self.auth_token or not self.domain:
+            raise RuntimeError(
+                "SkyMail 未配置完整：请设置 skymail_api_base、skymail_token、skymail_domain"
+            )
+
+    def _gen_prefix(self) -> str:
+        import random
+        import string
+
+        length = random.randint(8, 13)
+        chars = string.ascii_lowercase + string.digits
+        return "".join(random.choice(chars) for _ in range(length))
+
+    def get_email(self) -> MailboxAccount:
+        import requests
+
+        self._ensure_config()
+        email = f"{self._gen_prefix()}@{self.domain}"
+        payload = {"list": [{"email": email}]}
+        r = requests.post(
+            f"{self.api}/api/public/addUser",
+            json=payload,
+            headers=self._headers(),
+            proxies=self.proxy,
+            timeout=15,
+        )
+        if r.status_code != 200:
+            raise RuntimeError(f"SkyMail 创建邮箱失败: {r.status_code} {r.text[:200]}")
+
+        data = r.json()
+        if data.get("code") != 200:
+            raise RuntimeError(f"SkyMail 创建邮箱失败: {data}")
+
+        self._log(f"[SkyMail] 生成邮箱: {email}")
+        return MailboxAccount(email=email, account_id=email)
+
+    def _list_mails(self, email: str) -> list:
+        import requests
+
+        payload = {
+            "toEmail": email,
+            "num": 1,
+            "size": 20,
+        }
+        r = requests.post(
+            f"{self.api}/api/public/emailList",
+            json=payload,
+            headers=self._headers(),
+            proxies=self.proxy,
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        if data.get("code") != 200:
+            return []
+        return data.get("data") or []
+
+    def get_current_ids(self, account: MailboxAccount) -> set:
+        try:
+            mails = self._list_mails(account.account_id or account.email)
+            ids = set()
+            for i, msg in enumerate(mails):
+                mid = msg.get("id") or msg.get("mailId") or msg.get("messageId")
+                if mid:
+                    ids.add(str(mid))
+                else:
+                    digest = (
+                        str(msg.get("date") or msg.get("time") or "")
+                        + "|"
+                        + str(msg.get("subject") or "")
+                    )
+                    ids.add(f"idx-{i}-{digest}")
+            return ids
+        except Exception:
+            return set()
+
+    def wait_for_code(
+        self,
+        account: MailboxAccount,
+        keyword: str = "",
+        timeout: int = 120,
+        before_ids: set = None,
+        code_pattern: str = None,
+        **kwargs,
+    ) -> str:
+        import time
+
+        target = account.account_id or account.email
+        seen = set(before_ids or [])
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                mails = self._list_mails(target)
+                for i, msg in enumerate(mails):
+                    mid = msg.get("id") or msg.get("mailId") or msg.get("messageId")
+                    if not mid:
+                        digest = (
+                            str(msg.get("date") or msg.get("time") or "")
+                            + "|"
+                            + str(msg.get("subject") or "")
+                        )
+                        mid = f"idx-{i}-{digest}"
+                    mid = str(mid)
+                    if mid in seen:
+                        continue
+                    seen.add(mid)
+
+                    content = " ".join(
+                        [
+                            str(msg.get("subject") or ""),
+                            str(msg.get("content") or ""),
+                            str(msg.get("text") or ""),
+                            str(msg.get("html") or ""),
+                        ]
+                    )
+                    if keyword and keyword.lower() not in content.lower():
+                        continue
+
+                    code = self._safe_extract(content, code_pattern)
+                    if code:
+                        self._log(f"[SkyMail] 命中验证码: {code}")
+                        return code
+            except Exception:
+                pass
+            time.sleep(3)
+
         raise TimeoutError(f"等待验证码超时 ({timeout}s)")
 
 

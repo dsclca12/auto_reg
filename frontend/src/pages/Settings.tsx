@@ -17,6 +17,7 @@ const SELECT_FIELDS: Record<string, { label: string; value: string }[]> = {
   mail_provider: [
     { label: 'Laoudo（固定邮箱）', value: 'laoudo' },
     { label: 'TempMail.lol（自动生成）', value: 'tempmail_lol' },
+    { label: 'SkyMail（CloudMail 接口）', value: 'skymail' },
     { label: 'DuckMail（自动生成）', value: 'duckmail' },
     { label: 'MoeMail (sall.cc)', value: 'moemail' },
     { label: 'Freemail（自建 CF Worker）', value: 'freemail' },
@@ -81,6 +82,15 @@ const TAB_ITEMS = [
         title: 'MoeMail',
         desc: '自动注册账号并生成临时邮箱',
         fields: [{ key: 'moemail_api_url', label: 'API URL', placeholder: 'https://sall.cc' }],
+      },
+      {
+        title: 'SkyMail',
+        desc: 'CloudMail 兼容接口（addUser / emailList）',
+        fields: [
+          { key: 'skymail_api_base', label: 'API Base', placeholder: 'https://api.skymail.ink' },
+          { key: 'skymail_token', label: 'Authorization Token', secret: true },
+          { key: 'skymail_domain', label: '邮箱域名', placeholder: 'mail.example.com' },
+        ],
       },
       {
         title: 'TempMail.lol',
