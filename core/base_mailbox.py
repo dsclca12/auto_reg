@@ -1140,13 +1140,14 @@ class LuckMailMailbox(BaseMailbox):
         return ""
 
     def _extract_code_from_token_mails(self, token: str, code_pattern: str = None,
-                                       before_ids: set = None) -> Optional[str]:
+                                       before_ids: set = None, exclude_codes: set = None) -> Optional[str]:
         try:
             mail_list = self._client.user.get_token_mails(token)
         except Exception:
             return None
 
         seen = {str(mid) for mid in (before_ids or set())}
+        excluded = {str(code) for code in (exclude_codes or set()) if code}
         for mail in mail_list.mails:
             message_id = str(mail.message_id or "")
             if message_id and message_id in seen:
@@ -1157,6 +1158,8 @@ class LuckMailMailbox(BaseMailbox):
                 str(mail.html_body or ""),
             ])
             code = self._safe_extract(body, code_pattern)
+            if code and code in excluded:
+                continue
             if code:
                 return code
         return None
@@ -1271,6 +1274,8 @@ class LuckMailMailbox(BaseMailbox):
             raise RuntimeError("LuckMail 未找到已购邮箱 Token，无法等待验证码")
         self._log("[LuckMail] 等验证码分支: 已购邮箱 Token 收码")
 
+        exclude_codes = {str(code) for code in (kwargs.get("exclude_codes") or set()) if code}
+
         def on_poll(result):
             self._log(f"[LuckMail] 轮询中... 新邮件: {'是' if result.has_new_mail else '否'}")
 
@@ -1285,10 +1290,19 @@ class LuckMailMailbox(BaseMailbox):
             raise TimeoutError(f"LuckMail 等待验证码失败: {e}") from e
 
         code = code_result.verification_code
+        if code and code in exclude_codes:
+            code = None
         if not code and code_result.mail:
-            code = self._safe_extract(json.dumps(code_result.mail, ensure_ascii=False), code_pattern)
+            parsed_code = self._safe_extract(json.dumps(code_result.mail, ensure_ascii=False), code_pattern)
+            if parsed_code and parsed_code not in exclude_codes:
+                code = parsed_code
         if not code and (code_result.has_new_mail or before_ids is None):
-            code = self._extract_code_from_token_mails(token, code_pattern, before_ids=before_ids)
+            code = self._extract_code_from_token_mails(
+                token,
+                code_pattern,
+                before_ids=before_ids,
+                exclude_codes=exclude_codes,
+            )
 
         if code:
             self._log(f"[LuckMail] 收到验证码: {code}")
