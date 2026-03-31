@@ -144,6 +144,30 @@ function renderProbeBlock(
   )
 }
 
+function LocalProbeSummary({ probe }: { probe: any }) {
+  const auth = probe?.auth || {}
+  const subscription = probe?.subscription || {}
+  const codex = probe?.codex || {}
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <Tag color={authStateMeta(auth.state).color}>认证: {authStateMeta(auth.state).label}</Tag>
+        <Tag color={planMeta(subscription.plan).color}>订阅: {planMeta(subscription.plan).label}</Tag>
+        <Tag color={codexStateMeta(codex.state).color}>Codex: {codexStateMeta(codex.state).label}</Tag>
+      </div>
+      {probe?.checked_at ? (
+        <Text type="secondary">探测时间: {formatSyncTime(probe.checked_at)}</Text>
+      ) : null}
+      {auth.message ? <Text type="secondary">认证信息: {auth.message}</Text> : null}
+      {subscription.workspace_plan_type ? (
+        <Text type="secondary">工作区套餐: {subscription.workspace_plan_type}</Text>
+      ) : null}
+      {codex.message ? <Text type="secondary">Codex 信息: {codex.message}</Text> : null}
+    </div>
+  )
+}
+
 function LogPanel({ taskId, onDone }: { taskId: string; onDone: () => void }) {
   const [lines, setLines] = useState<string[]>([])
   const [done, setDone] = useState(false)
@@ -229,6 +253,7 @@ function ActionMenu({ acc, onRefresh }: { acc: any; onRefresh: () => void }) {
   const [resultStatus, setResultStatus] = useState<'success' | 'error'>('success')
   const [resultText, setResultText] = useState('')
   const [resultUrl, setResultUrl] = useState('')
+  const [resultProbe, setResultProbe] = useState<any>(null)
 
   useEffect(() => {
     apiFetch(`/actions/${acc.platform}`)
@@ -236,11 +261,12 @@ function ActionMenu({ acc, onRefresh }: { acc: any; onRefresh: () => void }) {
       .catch(() => {})
   }, [acc.platform])
 
-  const showResult = (title: string, status: 'success' | 'error', text: string, url = '') => {
+  const showResult = (title: string, status: 'success' | 'error', text: string, url = '', probe: any = null) => {
     setResultTitle(title)
     setResultStatus(status)
     setResultText(text)
     setResultUrl(url)
+    setResultProbe(probe)
     setResultOpen(true)
   }
 
@@ -273,13 +299,16 @@ function ActionMenu({ acc, onRefresh }: { acc: any; onRefresh: () => void }) {
         showResult(actionLabel, 'success', '操作成功，请在弹窗中打开或复制链接。', targetUrl)
       } else {
         message.success(data.message || '操作成功')
+        const probe = typeof data === 'object' && data ? data.probe || null : null
         const text =
-          typeof data === 'string'
+          probe
+            ? String(data.message || '操作成功')
+            : typeof data === 'string'
             ? data
             : Object.keys(data).length > 0
               ? JSON.stringify(data, null, 2)
               : '操作成功'
-        showResult(actionLabel, 'success', text)
+        showResult(actionLabel, 'success', text, '', probe)
       }
       onRefresh()
     } catch (e: any) {
@@ -337,6 +366,11 @@ function ActionMenu({ acc, onRefresh }: { acc: any; onRefresh: () => void }) {
           message={resultStatus === 'success' ? '操作完成' : '操作失败'}
           style={{ marginBottom: 12 }}
         />
+        {resultProbe ? (
+          <div style={{ marginBottom: 12 }}>
+            <LocalProbeSummary probe={resultProbe} />
+          </div>
+        ) : null}
         {resultUrl ? (
           <Space direction="vertical" style={{ width: '100%' }}>
             <Text copyable={{ text: resultUrl }} style={{ wordBreak: 'break-all' }}>
@@ -738,43 +772,25 @@ export default function Accounts() {
       4,
       0,
       {
-        title: '本地认证',
-        key: 'chatgpt_local_auth',
+        title: '本地状态',
+        key: 'chatgpt_local_state',
         render: (_: any, record: any) => {
           const auth = record.chatgptLocal?.auth || {}
-          return renderProbeBlock(
-            authStateMeta(auth.state),
-            auth.checked_at,
-            auth.message,
-          )
-        },
-      },
-      {
-        title: '订阅',
-        key: 'chatgpt_local_subscription',
-        render: (_: any, record: any) => {
           const subscription = record.chatgptLocal?.subscription || {}
-          const message = subscription.workspace_plan_type
-            ? `workspace_plan_type: ${subscription.workspace_plan_type}`
-            : ''
-          return renderProbeBlock(
-            planMeta(subscription.plan),
-            subscription.checked_at,
-            message,
-            120,
-          )
-        },
-      },
-      {
-        title: 'Codex',
-        key: 'chatgpt_local_codex',
-        render: (_: any, record: any) => {
           const codex = record.chatgptLocal?.codex || {}
+          const checkedAt = auth.checked_at || subscription.checked_at || codex.checked_at
+          const label = `${authStateMeta(auth.state).label} / ${planMeta(subscription.plan).label} / ${codexStateMeta(codex.state).label}`
+          const details = [
+            auth.message ? `认证: ${auth.message}` : '',
+            codex.message ? `Codex: ${codex.message}` : '',
+          ]
+            .filter(Boolean)
+            .join(' | ')
           return renderProbeBlock(
-            codexStateMeta(codex.state),
-            codex.checked_at,
-            codex.message,
-            150,
+            { color: authStateMeta(auth.state).color, label },
+            checkedAt,
+            details,
+            220,
           )
         },
       },
