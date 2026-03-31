@@ -54,13 +54,94 @@ function normalizeAccount(account: any) {
   const extra = parseExtraJson(account.extra_json)
   const syncStatuses = extra.sync_statuses && typeof extra.sync_statuses === 'object' ? extra.sync_statuses : {}
   const cpaSync = syncStatuses.cpa && typeof syncStatuses.cpa === 'object' ? syncStatuses.cpa : {}
-  return { ...account, extra, cpaSync }
+  const chatgptLocal = extra.chatgpt_local && typeof extra.chatgpt_local === 'object' ? extra.chatgpt_local : {}
+  return { ...account, extra, cpaSync, chatgptLocal }
 }
 
 function formatSyncTime(value?: string) {
   if (!value) return ''
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function authStateMeta(state?: string) {
+  switch (state) {
+    case 'access_token_valid':
+      return { color: 'success', label: 'AT有效' }
+    case 'access_token_invalidated':
+      return { color: 'error', label: 'AT失效' }
+    case 'unauthorized':
+      return { color: 'error', label: '未授权' }
+    case 'missing_access_token':
+      return { color: 'default', label: '缺少AT' }
+    case 'banned_like':
+      return { color: 'error', label: '疑似封禁' }
+    case 'probe_failed':
+      return { color: 'warning', label: '探测失败' }
+    default:
+      return { color: 'default', label: '未探测' }
+  }
+}
+
+function codexStateMeta(state?: string) {
+  switch (state) {
+    case 'usable':
+      return { color: 'success', label: '可用' }
+    case 'access_token_invalidated':
+      return { color: 'error', label: 'AT失效' }
+    case 'unauthorized':
+      return { color: 'error', label: '未授权' }
+    case 'payment_required':
+      return { color: 'warning', label: '需付费/权限' }
+    case 'quota_exhausted':
+      return { color: 'warning', label: '额度耗尽' }
+    case 'skipped_auth_invalid':
+      return { color: 'default', label: '未测' }
+    case 'probe_failed':
+      return { color: 'warning', label: '探测失败' }
+    default:
+      return { color: 'default', label: '未探测' }
+  }
+}
+
+function planMeta(plan?: string) {
+  switch ((plan || '').toLowerCase()) {
+    case 'plus':
+      return { color: 'success', label: 'Plus' }
+    case 'team':
+      return { color: 'processing', label: 'Team' }
+    case 'enterprise':
+      return { color: 'processing', label: 'Enterprise' }
+    case 'pro':
+      return { color: 'processing', label: 'Pro' }
+    case 'free':
+      return { color: 'default', label: 'Free' }
+    default:
+      return { color: 'default', label: '未知' }
+  }
+}
+
+function renderProbeBlock(
+  meta: { color: string; label: string },
+  checkedAt?: string,
+  message?: string,
+  minWidth = 140,
+) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth }}>
+      <Tag color={meta.color}>{meta.label}</Tag>
+      {checkedAt ? (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {formatSyncTime(checkedAt)}
+        </Text>
+      ) : null}
+      {message ? (
+        <Text type="secondary" ellipsis={{ tooltip: message }} style={{ maxWidth: 220, fontSize: 12 }}>
+          {message}
+        </Text>
+      ) : null}
+    </div>
+  )
 }
 
 function LogPanel({ taskId, onDone }: { taskId: string; onDone: () => void }) {
@@ -653,34 +734,79 @@ export default function Accounts() {
   ]
 
   if (currentPlatform === 'chatgpt') {
-    columns.splice(4, 0, {
-      title: 'CPA',
-      key: 'cpa_sync',
-      render: (_: any, record: any) => {
-        const sync = record.cpaSync || {}
-        const uploaded = Boolean(sync.uploaded || sync.uploaded_at)
-        const attempted = Boolean(sync.last_attempt_at)
-        const color = uploaded ? 'success' : attempted ? 'error' : 'default'
-        const label = uploaded ? '已上传' : attempted ? '最近失败' : '未上传'
-        const time = uploaded ? sync.uploaded_at : sync.last_attempt_at
-
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 140 }}>
-            <Tag color={color}>{label}</Tag>
-            {time ? (
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {formatSyncTime(time)}
-              </Text>
-            ) : null}
-            {sync.last_message ? (
-              <Text type="secondary" ellipsis={{ tooltip: sync.last_message }} style={{ maxWidth: 220, fontSize: 12 }}>
-                {sync.last_message}
-              </Text>
-            ) : null}
-          </div>
-        )
+    columns.splice(
+      4,
+      0,
+      {
+        title: '本地认证',
+        key: 'chatgpt_local_auth',
+        render: (_: any, record: any) => {
+          const auth = record.chatgptLocal?.auth || {}
+          return renderProbeBlock(
+            authStateMeta(auth.state),
+            auth.checked_at,
+            auth.message,
+          )
+        },
       },
-    })
+      {
+        title: '订阅',
+        key: 'chatgpt_local_subscription',
+        render: (_: any, record: any) => {
+          const subscription = record.chatgptLocal?.subscription || {}
+          const message = subscription.workspace_plan_type
+            ? `workspace_plan_type: ${subscription.workspace_plan_type}`
+            : ''
+          return renderProbeBlock(
+            planMeta(subscription.plan),
+            subscription.checked_at,
+            message,
+            120,
+          )
+        },
+      },
+      {
+        title: 'Codex',
+        key: 'chatgpt_local_codex',
+        render: (_: any, record: any) => {
+          const codex = record.chatgptLocal?.codex || {}
+          return renderProbeBlock(
+            codexStateMeta(codex.state),
+            codex.checked_at,
+            codex.message,
+            150,
+          )
+        },
+      },
+      {
+        title: 'CPA',
+        key: 'cpa_sync',
+        render: (_: any, record: any) => {
+          const sync = record.cpaSync || {}
+          const uploaded = Boolean(sync.uploaded || sync.uploaded_at)
+          const attempted = Boolean(sync.last_attempt_at)
+          const color = uploaded ? 'success' : attempted ? 'error' : 'default'
+          const label = uploaded ? '已上传' : attempted ? '最近失败' : '未上传'
+          const time = uploaded ? sync.uploaded_at : sync.last_attempt_at
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 140 }}>
+              <Tag color={color}>{label}</Tag>
+              {time ? (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {formatSyncTime(time)}
+                </Text>
+              ) : null}
+              {sync.last_message ? (
+                <Text type="secondary" ellipsis={{ tooltip: sync.last_message }} style={{ maxWidth: 220, fontSize: 12 }}>
+                  {sync.last_message}
+                </Text>
+              ) : null}
+            </div>
+          )
+        },
+      },
+    )
   }
 
   return (

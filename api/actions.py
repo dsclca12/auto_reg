@@ -52,6 +52,13 @@ def execute_action(
 
     try:
         result = instance.execute_action(action_id, account, body.params)
+        if result.get("ok") and isinstance(result.get("account_extra_patch"), dict):
+            extra = acc_model.get_extra()
+            extra.update(result["account_extra_patch"])
+            acc_model.set_extra(extra)
+            from datetime import datetime, timezone
+            acc_model.updated_at = datetime.now(timezone.utc)
+            session.add(acc_model)
         if platform == "chatgpt" and action_id == "upload_cpa":
             from services.chatgpt_sync import update_account_model_cpa_sync
 

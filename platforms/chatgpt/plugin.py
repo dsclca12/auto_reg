@@ -145,6 +145,7 @@ class ChatGPTPlatform(BasePlatform):
 
     def get_platform_actions(self) -> list:
         return [
+            {"id": "probe_local_status", "label": "探测本地状态", "params": []},
             {"id": "refresh_token", "label": "刷新 Token", "params": []},
             {"id": "payment_link", "label": "生成支付链接",
              "params": [
@@ -183,6 +184,27 @@ class ChatGPTPlatform(BasePlatform):
         a.session_token = extra.get("session_token", "")
         a.client_id = extra.get("client_id", "app_EMoamEEZ73f0CkXaXp7hrann")
         a.cookies = extra.get("cookies", "")
+        a.user_id = account.user_id
+
+        if action_id == "probe_local_status":
+            from platforms.chatgpt.status_probe import probe_local_chatgpt_status
+
+            probe_result = probe_local_chatgpt_status(a, proxy=proxy)
+            summary = (
+                f"认证={probe_result.get('auth', {}).get('state', 'unknown')}, "
+                f"订阅={probe_result.get('subscription', {}).get('plan', 'unknown')}, "
+                f"Codex={probe_result.get('codex', {}).get('state', 'unknown')}"
+            )
+            return {
+                "ok": True,
+                "data": {
+                    "message": f"本地状态探测完成：{summary}",
+                    "probe": probe_result,
+                },
+                "account_extra_patch": {
+                    "chatgpt_local": probe_result,
+                },
+            }
 
         if action_id == "refresh_token":
             from platforms.chatgpt.token_refresh import TokenRefreshManager
