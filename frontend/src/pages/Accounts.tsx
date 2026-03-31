@@ -244,9 +244,9 @@ function LocalProbeSummary({ probe }: { probe: any }) {
         <Tag color={codexStateMeta(codex.state).color}>Codex: {codexStateMeta(codex.state).label}</Tag>
       </div>
       <SummaryField label="探测时间" value={checkedAt ? formatSyncTime(checkedAt) : ''} />
-      <SummaryField label="认证信息" value={auth.message} />
+      <SummaryField label="认证信息" value={auth.message} code />
       <SummaryField label="工作区套餐" value={subscription.workspace_plan_type} />
-      <SummaryField label="Codex 信息" value={codex.message} />
+      <SummaryField label="Codex 信息" value={codex.message} code />
     </div>
   )
 }
@@ -942,13 +942,6 @@ export default function Accounts() {
 
   const getStatusSyncScope = (): 'selected' | 'all' => (selectedRowKeys.length > 0 ? 'selected' : 'all')
 
-  const statusSyncButtonLabel = (kind: 'probe' | 'remote') => {
-    const scope = getStatusSyncScope()
-    const count = scope === 'selected' ? selectedRowKeys.length : total
-    const base = kind === 'probe' ? '本地状态' : 'CLIProxyAPI'
-    return scope === 'selected' ? `同步所选${base} (${count})` : `同步当前筛选${base} (${count})`
-  }
-
   const isChatgptPlatform = currentPlatform === 'chatgpt'
   const monospaceStyle: React.CSSProperties = {
     fontFamily: 'SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
@@ -1056,7 +1049,7 @@ export default function Accounts() {
       {
         title: '本地状态',
         key: 'chatgpt_local_state',
-        width: 300,
+        width: 220,
         render: (_: any, record: any) => {
           const auth = record.chatgptLocal?.auth || {}
           const subscription = record.chatgptLocal?.subscription || {}
@@ -1064,13 +1057,6 @@ export default function Accounts() {
           const authMeta = authStateMeta(auth.state)
           const planTag = planMeta(subscription.plan)
           const codexMeta = codexStateMeta(codex.state)
-          const checkedAt = auth.checked_at || subscription.checked_at || codex.checked_at
-          const details = [
-            auth.message ? `认证: ${auth.message}` : '',
-            codex.message ? `Codex: ${codex.message}` : '',
-          ]
-            .filter(Boolean)
-            .join(' | ')
 
           return (
             <div style={{ ...cellStackStyle, ...compactPanelStyle }}>
@@ -1079,14 +1065,6 @@ export default function Accounts() {
                 <Tag color={planTag.color}>{planTag.label}</Tag>
                 <Tag color={codexMeta.color}>Codex {codexMeta.label}</Tag>
               </div>
-              <Text type="secondary" style={secondaryTextStyle}>
-                {checkedAt ? formatSyncTime(checkedAt) : '尚未探测'}
-              </Text>
-              {details ? (
-                <Text type="secondary" ellipsis={{ tooltip: details }} style={detailTextStyle}>
-                  {details}
-                </Text>
-              ) : null}
             </div>
           )
         },
@@ -1094,24 +1072,14 @@ export default function Accounts() {
       {
         title: 'CLIProxyAPI',
         key: 'cliproxy_sync',
-        width: 240,
+        width: 170,
         render: (_: any, record: any) => {
           const sync = record.cliproxySync || {}
           const meta = cliproxyStateMeta(sync)
-          const time = sync.last_synced_at || sync.last_probe_at
-          const detail = sync.last_probe_message || sync.message
 
           return (
             <div style={{ ...cellStackStyle, ...compactPanelStyle }}>
               <Tag color={meta.color}>{meta.label}</Tag>
-              <Text type="secondary" style={secondaryTextStyle}>
-                {time ? formatSyncTime(time) : '尚未同步'}
-              </Text>
-              {detail ? (
-                <Text type="secondary" ellipsis={{ tooltip: detail }} style={detailTextStyle}>
-                  {detail}
-                </Text>
-              ) : null}
             </div>
           )
         },
@@ -1208,6 +1176,25 @@ export default function Accounts() {
     },
   )
 
+  const statusSyncMenuItems: MenuProps['items'] = [
+    {
+      key: `probe:${getStatusSyncScope()}`,
+      label:
+        getStatusSyncScope() === 'selected'
+          ? `同步所选本地状态 (${selectedRowKeys.length})`
+          : `同步当前筛选本地状态 (${total})`,
+      disabled: getStatusSyncScope() === 'selected' ? selectedRowKeys.length === 0 : total === 0,
+    },
+    {
+      key: `remote:${getStatusSyncScope()}`,
+      label:
+        getStatusSyncScope() === 'selected'
+          ? `同步所选 CLIProxyAPI 状态 (${selectedRowKeys.length})`
+          : `同步当前筛选 CLIProxyAPI 状态 (${total})`,
+      disabled: getStatusSyncScope() === 'selected' ? selectedRowKeys.length === 0 : total === 0,
+    },
+  ]
+
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
@@ -1238,24 +1225,24 @@ export default function Accounts() {
         </Space>
         <Space>
           {currentPlatform === 'chatgpt' && (
-            <Button
-              icon={<SyncOutlined />}
-              loading={statusSyncLoading === 'probe_selected' || statusSyncLoading === 'probe_all'}
-              disabled={total === 0}
-              onClick={() => handleBatchStatusSync('probe', getStatusSyncScope())}
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: statusSyncMenuItems,
+                onClick: ({ key }) => {
+                  const [kind, scope] = String(key).split(':') as ['probe' | 'remote', 'selected' | 'all']
+                  handleBatchStatusSync(kind, scope)
+                },
+              }}
             >
-              {statusSyncButtonLabel('probe')}
-            </Button>
-          )}
-          {currentPlatform === 'chatgpt' && (
-            <Button
-              icon={<SyncOutlined />}
-              loading={statusSyncLoading === 'remote_selected' || statusSyncLoading === 'remote_all'}
-              disabled={total === 0}
-              onClick={() => handleBatchStatusSync('remote', getStatusSyncScope())}
-            >
-              {statusSyncButtonLabel('remote')}
-            </Button>
+              <Button
+                icon={<SyncOutlined />}
+                loading={statusSyncLoading !== ''}
+                disabled={total === 0}
+              >
+                状态同步
+              </Button>
+            </Dropdown>
           )}
           {currentPlatform === 'chatgpt' && selectedRowKeys.length > 0 && (
             <Popconfirm
