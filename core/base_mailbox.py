@@ -105,6 +105,8 @@ def create_mailbox(provider: str, extra: dict = None, proxy: str = None) -> 'Bas
             api_url=(extra.get("duckmail_api_url") or "https://www.duckmail.sbs"),
             provider_url=(extra.get("duckmail_provider_url") or "https://api.duckmail.sbs"),
             bearer=(extra.get("duckmail_bearer") or "kevin273945"),
+            domain=extra.get("duckmail_domain", ""),
+            api_key=extra.get("duckmail_api_key", ""),
             proxy=proxy,
         )
     elif provider == "freemail":
@@ -493,62 +495,85 @@ class DuckMailMailbox(BaseMailbox):
     def __init__(self, api_url: str = "https://www.duckmail.sbs",
                  provider_url: str = "https://api.duckmail.sbs",
                  bearer: str = "kevin273945",
+                 domain: str = "",
+                 api_key: str = "",
                  proxy: str = None):
         self.api = (api_url or "https://www.duckmail.sbs").rstrip("/")
-        self.provider_url = provider_url or "https://api.duckmail.sbs"
+        self.provider_url = (provider_url or "https://api.duckmail.sbs").rstrip("/")
         self.bearer = bearer or "kevin273945"
+        self.domain = str(domain or "").strip()
+        self.api_key = str(api_key or "").strip()
         self.proxy = {"http": proxy, "https": proxy} if proxy else None
         self._token = None
         self._address = None
+        # 如果配置了 API Key，直接请求 DuckMail API；否则走前端代理
+        self._direct = bool(self.api_key)
 
-    def _common_headers(self) -> dict:
+    def _proxy_headers(self) -> dict:
         return {
             "authorization": f"Bearer {self.bearer}",
             "content-type": "application/json",
             "x-api-provider-base-url": self.provider_url,
         }
 
+    def _direct_headers(self, token: str = "") -> dict:
+        auth = token or self.api_key
+        return {
+            "authorization": f"Bearer {auth}",
+            "content-type": "application/json",
+        }
+
+    def _request(self, method: str, endpoint: str, token: str = "", **kwargs):
+        """统一请求方法，根据模式选择直连或代理"""
+        import requests
+        if self._direct:
+            url = f"{self.provider_url}{endpoint}"
+            headers = self._direct_headers(token)
+        else:
+            from urllib.parse import quote
+            url = f"{self.api}/api/mail?endpoint={quote(endpoint, safe='')}"
+            headers = self._proxy_headers() if not token else {
+                "authorization": f"Bearer {token}",
+                "x-api-provider-base-url": self.provider_url,
+            }
+        r = requests.request(method, url, headers=headers, proxies=self.proxy, timeout=15, **kwargs)
+        return r
+
     def get_email(self) -> MailboxAccount:
-        import requests, random, string
+        import random, string
         username = "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
         password = "Test" + "".join(random.choices(string.digits, k=8)) + "!"
-        domain = self.provider_url.replace("https://api.", "").replace("https://", "")
+        domain = self.domain or self.provider_url.replace("https://api.", "").replace("https://", "")
         address = f"{username}@{domain}"
+        print(f"[DuckMail] 创建账号: {address} direct={self._direct}")
         # 创建账号
-        r = requests.post(f"{self.api}/api/mail?endpoint=%2Faccounts",
-            json={"address": address, "password": password},
-            headers=self._common_headers(), proxies=self.proxy, timeout=15)
+        r = self._request("POST", "/accounts", json={"address": address, "password": password})
+        if r.status_code >= 400 or not r.text.strip().startswith("{"):
+            raise RuntimeError(f"[DuckMail] 创建账号失败: HTTP {r.status_code} body={r.text[:300]}")
         data = r.json()
         self._address = data.get("address", address)
         # 登录获取 token
-        r2 = requests.post(f"{self.api}/api/mail?endpoint=%2Ftoken",
-            json={"address": self._address, "password": password},
-            headers=self._common_headers(), proxies=self.proxy, timeout=15)
+        r2 = self._request("POST", "/token", json={"address": self._address, "password": password})
+        if r2.status_code >= 400 or not r2.text.strip().startswith(("{", "[")):
+            raise RuntimeError(f"[DuckMail] 登录失败: HTTP {r2.status_code} body={r2.text[:300]}")
         self._token = r2.json().get("token", "")
         return MailboxAccount(email=self._address, account_id=self._token)
 
     def get_current_ids(self, account: MailboxAccount) -> set:
-        import requests
         try:
-            r = requests.get(f"{self.api}/api/mail?endpoint=%2Fmessages%3Fpage%3D1",
-                headers={"authorization": f"Bearer {account.account_id}",
-                         "x-api-provider-base-url": self.provider_url},
-                proxies=self.proxy, timeout=10)
+            r = self._request("GET", "/messages?page=1", token=account.account_id)
             return {str(m["id"]) for m in r.json().get("hydra:member", [])}
         except Exception:
             return set()
 
     def wait_for_code(self, account: MailboxAccount, keyword: str = "",
                       timeout: int = 120, before_ids: set = None, code_pattern: str = None, **kwargs) -> str:
-        import re, time, requests
+        import re, time
         seen = set(before_ids or [])
         start = time.time()
         while time.time() - start < timeout:
             try:
-                r = requests.get(f"{self.api}/api/mail?endpoint=%2Fmessages%3Fpage%3D1",
-                    headers={"authorization": f"Bearer {account.account_id}",
-                             "x-api-provider-base-url": self.provider_url},
-                    proxies=self.proxy, timeout=10)
+                r = self._request("GET", "/messages?page=1", token=account.account_id)
                 msgs = r.json().get("hydra:member", [])
                 for msg in msgs:
                     mid = str(msg.get("id") or msg.get("msgid") or "")
@@ -556,10 +581,7 @@ class DuckMailMailbox(BaseMailbox):
                     seen.add(mid)
                     # 请求邮件详情获取完整 text
                     try:
-                        r2 = requests.get(f"{self.api}/api/mail?endpoint=%2Fmessages%2F{mid}",
-                            headers={"authorization": f"Bearer {account.account_id}",
-                                     "x-api-provider-base-url": self.provider_url},
-                            proxies=self.proxy, timeout=10)
+                        r2 = self._request("GET", f"/messages/{mid}", token=account.account_id)
                         detail = r2.json()
                         body = str(detail.get("text") or "") + " " + str(detail.get("subject") or "")
                     except Exception:
