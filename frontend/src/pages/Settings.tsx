@@ -18,6 +18,7 @@ import { apiFetch } from '@/lib/utils'
 
 const SELECT_FIELDS: Record<string, { label: string; value: string }[]> = {
   mail_provider: [
+    { label: 'LuckMail（订单接码 / 已购邮箱）', value: 'luckmail' },
     { label: 'Laoudo（固定邮箱）', value: 'laoudo' },
     { label: 'TempMail.lol（自动生成）', value: 'tempmail_lol' },
     { label: 'SkyMail（CloudMail 接口）', value: 'skymail' },
@@ -26,7 +27,6 @@ const SELECT_FIELDS: Record<string, { label: string; value: string }[]> = {
     { label: 'YYDS Mail / MaliAPI', value: 'maliapi' },
     { label: 'Freemail（自建 CF Worker）', value: 'freemail' },
     { label: 'CF Worker（自建域名）', value: 'cfworker' },
-    { label: 'LuckMail（订单接码 / 已购邮箱）', value: 'luckmail' },
   ],
   maliapi_auto_domain_strategy: [
     { label: 'balanced', value: 'balanced' },
@@ -1035,6 +1035,9 @@ export default function Settings() {
 
   useEffect(() => {
     apiFetch('/config').then((data) => {
+      if (!data.mail_provider) {
+        data.mail_provider = 'luckmail'
+      }
       if (!data.maliapi_base_url) {
         data.maliapi_base_url = 'https://maliapi.215.im/v1'
       }

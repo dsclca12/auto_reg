@@ -192,7 +192,7 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                 {k: v for k, v in req.extra.items() if v is not None and v != ""}
             )
             return create_mailbox(
-                provider=merged_extra.get("mail_provider", "laoudo"),
+                provider=merged_extra.get("mail_provider", "luckmail"),
                 extra=merged_extra,
                 proxy=proxy,
             )

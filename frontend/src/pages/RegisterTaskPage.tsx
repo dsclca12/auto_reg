@@ -40,7 +40,7 @@ export default function RegisterTaskPage() {
       form.setFieldsValue({
         executor_type: normalizeExecutorForPlatform(currentPlatform, cfg.default_executor),
         captcha_solver: cfg.default_captcha_solver || 'yescaptcha',
-        mail_provider: cfg.mail_provider || 'moemail',
+        mail_provider: cfg.mail_provider || 'luckmail',
         yescaptcha_key: cfg.yescaptcha_key || '',
         moemail_api_url: cfg.moemail_api_url || '',
         skymail_api_base: cfg.skymail_api_base || 'https://api.skymail.ink',
@@ -189,7 +189,7 @@ export default function RegisterTaskPage() {
         platform: 'trae',
         executor_type: 'protocol',
         captcha_solver: 'yescaptcha',
-        mail_provider: 'moemail',
+        mail_provider: 'luckmail',
         count: 1,
         register_delay_seconds: 0,
         maliapi_base_url: 'https://maliapi.215.im/v1',
@@ -249,6 +249,7 @@ export default function RegisterTaskPage() {
           <Form.Item name="mail_provider" label="邮箱服务" rules={[{ required: true }]}>
             <Select
               options={[
+                { value: 'luckmail', label: 'LuckMail' },
                 { value: 'moemail', label: 'MoeMail (sall.cc)' },
                 { value: 'tempmail_lol', label: 'TempMail.lol' },
                 { value: 'skymail', label: 'SkyMail (CloudMail)' },
@@ -257,7 +258,6 @@ export default function RegisterTaskPage() {
                 { value: 'freemail', label: 'Freemail' },
                 { value: 'laoudo', label: 'Laoudo' },
                 { value: 'cfworker', label: 'CF Worker' },
-                { value: 'luckmail', label: 'LuckMail' },
               ]}
             />
           </Form.Item>

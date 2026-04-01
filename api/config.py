@@ -81,6 +81,10 @@ class ConfigUpdate(BaseModel):
 @router.get("")
 def get_config():
     all_cfg = config_store.get_all()
+    if not all_cfg.get("mail_provider"):
+        all_cfg["mail_provider"] = "luckmail"
+    if not all_cfg.get("luckmail_base_url"):
+        all_cfg["luckmail_base_url"] = "https://mails.luckyous.com/"
     # 只返回已知 key，未设置的返回空字符串
     return {k: all_cfg.get(k, "") for k in CONFIG_KEYS}
 

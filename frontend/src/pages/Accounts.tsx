@@ -788,7 +788,7 @@ export default function Accounts() {
       const cfg = await apiFetch('/config')
       const executorType = normalizeExecutorForPlatform(currentPlatform, cfg.default_executor)
       const registerExtra = {
-        mail_provider: cfg.mail_provider || 'laoudo',
+        mail_provider: cfg.mail_provider || 'luckmail',
         laoudo_auth: cfg.laoudo_auth,
         laoudo_email: cfg.laoudo_email,
         laoudo_account_id: cfg.laoudo_account_id,
