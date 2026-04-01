@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Table,
@@ -30,10 +30,11 @@ import {
   SyncOutlined,
 } from '@ant-design/icons'
 import { ChatGPTRegistrationModeSwitch } from '@/components/ChatGPTRegistrationModeSwitch'
+import { TaskLogPanel } from '@/components/TaskLogPanel'
 import { usePersistentChatGPTRegistrationMode } from '@/hooks/usePersistentChatGPTRegistrationMode'
 import { parseBooleanConfigValue } from '@/lib/configValueParsers'
 import { buildChatGPTRegistrationRequestAdapter } from '@/lib/chatgptRegistrationRequestAdapter'
-import { apiFetch, API_BASE, getToken } from '@/lib/utils'
+import { apiFetch } from '@/lib/utils'
 import { normalizeExecutorForPlatform } from '@/lib/platformExecutorOptions'
 
 const { Text } = Typography
@@ -318,167 +319,6 @@ function CliproxySyncSummary({ sync }: { sync: any }) {
       <SummaryField label="远端刷新时间" value={sync?.last_refresh ? formatSyncTime(sync.last_refresh) : ''} />
       <SummaryField label="下次重试时间" value={sync?.next_retry_after ? formatSyncTime(sync.next_retry_after) : ''} />
       <SummaryField label="探测信息" value={sync?.last_probe_message} code />
-    </div>
-  )
-}
-
-function LogPanel({ taskId, onDone }: { taskId: string; onDone: () => void }) {
-  const [lines, setLines] = useState<string[]>([])
-  const [done, setDone] = useState(false)
-  const [error, setError] = useState('')
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const nextSinceRef = useRef(0)
-  const handleCopyAll = async () => {
-    try {
-      await navigator.clipboard.writeText(lines.join('\n'))
-      message.success('日志已复制')
-    } catch {
-      message.error('复制失败')
-    }
-  }
-
-  useEffect(() => {
-    if (!taskId) return
-    const controller = new AbortController()
-    let cancelled = false
-    const BASE_RETRY_MS = 1000
-    const MAX_RETRY_MS = 8000
-    nextSinceRef.current = 0
-    setLines([])
-
-    const sleep = async (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-    const connectStreamOnce = async (): Promise<boolean> => {
-      try {
-        const token = getToken()
-        const headers: Record<string, string> = {}
-        if (token) headers['Authorization'] = `Bearer ${token}`
-
-        const since = nextSinceRef.current
-        const res = await fetch(`${API_BASE}/tasks/${taskId}/logs/stream?since=${since}`, {
-          headers,
-          signal: controller.signal,
-        })
-        if (!res.ok) {
-          setError(`日志流连接失败 (${res.status})`)
-          return true
-        }
-
-        if (!res.body) {
-          setError('日志流未返回可读数据')
-          return false
-        }
-
-        setError('')
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-
-        while (!cancelled) {
-          const { done: readerDone, value } = await reader.read()
-          if (readerDone) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const parts = buffer.split('\n\n')
-          buffer = parts.pop() || ''
-
-          for (const part of parts) {
-            const match = part.match(/^data:\s*(.+)$/m)
-            if (!match) continue
-            try {
-              const d = JSON.parse(match[1])
-              if (d.line) {
-                nextSinceRef.current += 1
-                setLines((prev) => [...prev, d.line])
-              }
-              if (d.done) {
-                setDone(true)
-                onDone()
-                return true
-              }
-            } catch {
-              // SSE 帧解析异常，跳过
-            }
-          }
-        }
-        return false
-      } catch (e: any) {
-        if (!cancelled && e.name !== 'AbortError') {
-          return false
-        }
-        return true
-      }
-    }
-
-    const connectStream = async () => {
-      setDone(false)
-      setError('')
-      let retryCount = 0
-
-      while (!cancelled) {
-        const shouldStop = await connectStreamOnce()
-        if (shouldStop || cancelled) return
-
-        retryCount += 1
-        const retryMs = Math.min(BASE_RETRY_MS * (2 ** (retryCount - 1)), MAX_RETRY_MS)
-        setError(`日志流连接中断，${retryMs / 1000}s 后重试（第 ${retryCount} 次）`)
-        await sleep(retryMs)
-      }
-    }
-
-    connectStream()
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
-  }, [taskId])
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [lines])
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-        <Button size="small" icon={<CopyOutlined />} onClick={handleCopyAll} disabled={lines.length === 0}>
-          复制日志
-        </Button>
-      </div>
-      <div
-        className="log-panel"
-        style={{
-          flex: 1,
-          overflow: 'auto',
-          background: '#ffffff',
-          border: '1px solid #e5e7eb',
-          borderRadius: 8,
-          padding: 12,
-          fontFamily: 'monospace',
-          fontSize: 12,
-          minHeight: 200,
-          maxHeight: 400,
-          userSelect: 'text',
-          WebkitUserSelect: 'text',
-          cursor: 'text',
-          whiteSpace: 'pre-wrap',
-        }}
-      >
-        {lines.length === 0 && !error && <div style={{ color: '#9ca3af' }}>等待日志...</div>}
-        {error && <div style={{ color: '#dc2626' }}>{error}</div>}
-        {lines.map((l, i) => (
-          <div
-            key={i}
-            style={{
-              lineHeight: 1.5,
-              color: l.includes('✓') || l.includes('成功') ? '#059669' : l.includes('✗') || l.includes('失败') || l.includes('错误') ? '#dc2626' : '#1f2937',
-            }}
-          >
-            {l}
-          </div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
-      {done && <div style={{ fontSize: 12, color: '#10b981', marginTop: 8 }}>注册完成</div>}
     </div>
   )
 }
@@ -1408,7 +1248,7 @@ export default function Accounts() {
             </Form.Item>
           </Form>
         ) : (
-          <LogPanel taskId={taskId} onDone={() => { load(); }} />
+          <TaskLogPanel taskId={taskId} onDone={() => { load(); }} />
         )}
       </Modal>
 

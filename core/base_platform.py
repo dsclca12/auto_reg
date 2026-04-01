@@ -48,6 +48,7 @@ class BasePlatform(ABC):
 
     def __init__(self, config: RegisterConfig = None):
         self.config = config or RegisterConfig()
+        self._task_control = None
         if self.config.executor_type not in self.supported_executors:
             raise NotImplementedError(
                 f"{self.display_name} 暂不支持 '{self.config.executor_type}' 执行器，"
@@ -84,6 +85,33 @@ class BasePlatform(ABC):
     def get_quota(self, account: Account) -> dict:
         """查询账号配额（可选实现）"""
         return {}
+
+    def bind_task_control(self, task_control) -> None:
+        """绑定协作式任务控制器，供邮箱等待/人工跳过等场景复用。"""
+        self._task_control = task_control
+        mailbox = getattr(self, "mailbox", None)
+        if mailbox is not None:
+            mailbox._task_control = task_control
+
+    def get_mailbox_otp_timeout(self, default: int = 120) -> int:
+        """统一解析邮箱 OTP 等待秒数，避免平台内散落魔法值。"""
+        extra = getattr(self.config, "extra", {}) or {}
+        candidates = (
+            extra.get("mailbox_otp_timeout_seconds"),
+            extra.get("email_otp_timeout_seconds"),
+            extra.get("otp_timeout"),
+            default,
+        )
+        for value in candidates:
+            if value in (None, ""):
+                continue
+            try:
+                resolved = int(value)
+            except (TypeError, ValueError):
+                continue
+            if resolved > 0:
+                return resolved
+        return default
 
     def _make_executor(self):
         """根据 config 创建执行器"""

@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from typing import Optional, Callable
 
+from core.task_runtime import TaskInterruption
 from platforms.chatgpt.refresh_token_registration_engine import RegistrationResult
 
 from .chatgpt_client import ChatGPTClient
@@ -188,6 +189,8 @@ class AccessTokenOnlyRegistrationEngine:
                         continue
                     result.error_message = last_error
                     return result
+                except TaskInterruption:
+                    raise
                 except Exception as attempt_error:
                     last_error = str(attempt_error)
                     if attempt < self.max_retries - 1 and self._should_retry(last_error):
@@ -198,6 +201,8 @@ class AccessTokenOnlyRegistrationEngine:
             result.error_message = last_error or "注册失败"
             return result
                 
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"无 RT 注册全流程执行异常: {e}", "error")
             import traceback

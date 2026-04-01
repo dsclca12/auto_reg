@@ -19,6 +19,7 @@ import {
   LoadingOutlined,
 } from '@ant-design/icons'
 import { ChatGPTRegistrationModeSwitch } from '@/components/ChatGPTRegistrationModeSwitch'
+import { TaskLogPanel } from '@/components/TaskLogPanel'
 import { usePersistentChatGPTRegistrationMode } from '@/hooks/usePersistentChatGPTRegistrationMode'
 import { parseBooleanConfigValue } from '@/lib/configValueParsers'
 import { buildChatGPTRegistrationRequestAdapter } from '@/lib/chatgptRegistrationRequestAdapter'
@@ -155,7 +156,7 @@ export default function RegisterTaskPage() {
     const interval = setInterval(async () => {
       const t = await apiFetch(`/tasks/${id}`)
       setTask(t)
-      if (t.status === 'done' || t.status === 'failed') {
+      if (t.status === 'done' || t.status === 'failed' || t.status === 'stopped') {
         clearInterval(interval)
         setPolling(false)
         if (t.cashier_urls && t.cashier_urls.length > 0) {
@@ -416,6 +417,7 @@ export default function RegisterTaskPage() {
             <span>任务状态</span>
             <Tag color={
               task.status === 'done' ? 'success' :
+              task.status === 'stopped' ? 'warning' :
               task.status === 'failed' ? 'error' : 'processing'
             }>
               {task.status}
@@ -427,6 +429,7 @@ export default function RegisterTaskPage() {
               <Text copyable style={{ fontFamily: 'monospace' }}>{task.id}</Text>
             </Descriptions.Item>
             <Descriptions.Item label="进度">{task.progress}</Descriptions.Item>
+            <Descriptions.Item label="跳过">{task.skipped ?? 0}</Descriptions.Item>
           </Descriptions>
           {task.success != null && (
             <div style={{ marginTop: 8, color: '#10b981' }}>
@@ -447,6 +450,11 @@ export default function RegisterTaskPage() {
               <CloseCircleOutlined /> {task.error}
             </div>
           )}
+          {task.id ? (
+            <div style={{ marginTop: 16 }}>
+              <TaskLogPanel taskId={task.id} />
+            </div>
+          ) : null}
         </Card>
       )}
     </div>

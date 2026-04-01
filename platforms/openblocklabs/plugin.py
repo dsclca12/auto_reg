@@ -25,10 +25,16 @@ class OpenBlockLabsPlatform(BasePlatform):
         email = email or (mail_acct.email if mail_acct else None)
         log(f"邮箱: {email}")
         before_ids = self.mailbox.get_current_ids(mail_acct) if mail_acct else set()
+        otp_timeout = self.get_mailbox_otp_timeout()
 
         def otp_cb():
             log("等待验证码...")
-            code = self.mailbox.wait_for_code(mail_acct, keyword="", before_ids=before_ids)
+            code = self.mailbox.wait_for_code(
+                mail_acct,
+                keyword="",
+                timeout=otp_timeout,
+                before_ids=before_ids,
+            )
             if code: log(f"验证码: {code}")
             return code
 

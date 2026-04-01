@@ -15,6 +15,7 @@ from datetime import datetime
 
 from curl_cffi import requests as cffi_requests
 
+from core.task_runtime import TaskInterruption
 from .oauth import OAuthManager, OAuthStart
 from .http_client import OpenAIHTTPClient, HTTPClientError
 # from ..services import EmailServiceFactory, BaseEmailService, EmailServiceType  # removed: external dep
@@ -659,6 +660,8 @@ class RefreshTokenRegistrationEngine:
                 self._log("等待验证码超时", "error")
                 return None
 
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"获取验证码失败: {e}", "error")
             return None
@@ -973,6 +976,8 @@ class RefreshTokenRegistrationEngine:
 
             return result
 
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"注册过程中发生未预期错误: {e}", "error")
             result.error_message = str(e)

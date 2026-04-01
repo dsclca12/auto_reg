@@ -104,6 +104,7 @@ class ChatGPTPlatform(BasePlatform):
             from core.base_mailbox import TempMailLolMailbox
 
             _tmail = TempMailLolMailbox(proxy=proxy)
+            _tmail._task_control = getattr(self, "_task_control", None)
 
             class TempMailEmailService:
                 service_type = type("ST", (), {"value": "tempmail_lol"})()
