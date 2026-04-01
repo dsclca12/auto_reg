@@ -243,6 +243,7 @@ const TAB_ITEMS = [
         title: '管理面板',
         desc: '用于 CLIProxyAPI 管理页登录',
         fields: [
+          { key: 'cliproxyapi_base_url', label: 'API URL', placeholder: 'http://127.0.0.1:8317' },
           { key: 'cliproxyapi_management_key', label: '管理口令', secret: true, placeholder: '默认 cliproxyapi' },
         ],
       },
