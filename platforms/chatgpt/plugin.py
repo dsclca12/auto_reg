@@ -39,16 +39,8 @@ class ChatGPTPlatform(BasePlatform):
             password = "".join(random.choices(string.ascii_letters + string.digits + "!@#$", k=16))
 
         proxy = self.config.proxy if self.config else None
-        browser_mode = (self.config.executor_type if self.config else None) or "protocol"
         log_fn = getattr(self, "_log_fn", print)
-        from platforms.chatgpt.register_v2 import RegistrationEngineV2 as RegistrationEngine
-
-        max_retries = 3
-        if self.config and getattr(self.config, "extra", None):
-            try:
-                max_retries = int((self.config.extra or {}).get("register_max_retries", 3) or 3)
-            except Exception:
-                max_retries = 3
+        from platforms.chatgpt.register import RegistrationEngine
 
         if self.mailbox:
             _mailbox = self.mailbox
@@ -100,10 +92,7 @@ class ChatGPTPlatform(BasePlatform):
             engine = RegistrationEngine(
                 email_service=GenericEmailService(),
                 proxy_url=proxy,
-                browser_mode=browser_mode,
                 callback_logger=log_fn,
-                max_retries=max_retries,
-                extra_config=(self.config.extra or {}),
             )
             engine.email = email
             engine.password = password
@@ -147,10 +136,7 @@ class ChatGPTPlatform(BasePlatform):
             engine = RegistrationEngine(
                 email_service=TempMailEmailService(),
                 proxy_url=proxy,
-                browser_mode=browser_mode,
                 callback_logger=log_fn,
-                max_retries=max_retries,
-                extra_config=(self.config.extra or {}),
             )
             if email:
                 engine.email = email

@@ -6,6 +6,7 @@ import {
   InputNumber,
   Select,
   Button,
+  Checkbox,
   Tag,
   Space,
   Typography,
@@ -57,6 +58,8 @@ export default function Register() {
         cfworker_admin_token: cfg.cfworker_admin_token || '',
         cfworker_custom_auth: cfg.cfworker_custom_auth || '',
         cfworker_domain_override: '',
+        cfworker_subdomain: cfg.cfworker_subdomain || '',
+        cfworker_random_subdomain: cfg.cfworker_random_subdomain || false,
         cfworker_fingerprint: cfg.cfworker_fingerprint || '',
         smstome_cookie: cfg.smstome_cookie || '',
         smstome_country_slugs: cfg.smstome_country_slugs || '',
@@ -109,6 +112,8 @@ export default function Register() {
           cfworker_admin_token: values.cfworker_admin_token,
           cfworker_custom_auth: values.cfworker_custom_auth,
           cfworker_domain_override: values.cfworker_domain_override,
+          cfworker_subdomain: values.cfworker_subdomain,
+          cfworker_random_subdomain: values.cfworker_random_subdomain,
           cfworker_fingerprint: values.cfworker_fingerprint,
           smstome_cookie: values.smstome_cookie,
           smstome_country_slugs: values.smstome_country_slugs,
@@ -297,6 +302,16 @@ export default function Register() {
                 extra="留空时将从设置页已启用的域名列表中随机选择。"
               >
                 <Input placeholder="example.com" />
+              </Form.Item>
+              <Form.Item
+                name="cfworker_subdomain"
+                label="子域名（可选）"
+                extra="填写后将生成 xxx@子域名.根域名；若启用随机子域名，则会生成 xxx@随机值.子域名.根域名。"
+              >
+                <Input placeholder="mail / pool-a" />
+              </Form.Item>
+              <Form.Item name="cfworker_random_subdomain" label="随机子域名" valuePropName="checked">
+                <Checkbox>每次注册前随机生成一层子域名</Checkbox>
               </Form.Item>
               <Form.Item name="cfworker_fingerprint" label="Fingerprint (可选)">
                 <Input placeholder="cfb82279f..." />

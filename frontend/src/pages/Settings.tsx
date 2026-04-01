@@ -141,6 +141,8 @@ const TAB_ITEMS = [
           { key: 'cfworker_api_url', label: 'API URL', placeholder: 'https://apimail.example.com' },
           { key: 'cfworker_admin_token', label: '管理员 Token', secret: true },
           { key: 'cfworker_custom_auth', label: '站点密码', secret: true },
+          { key: 'cfworker_subdomain', label: '固定子域名', placeholder: 'mail / pool-a' },
+          { key: 'cfworker_random_subdomain', label: '随机子域名', placeholder: 'true / false' },
           { key: 'cfworker_fingerprint', label: 'Fingerprint', placeholder: '6703363b...' },
         ],
       },

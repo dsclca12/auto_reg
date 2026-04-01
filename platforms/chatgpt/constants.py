@@ -61,6 +61,7 @@ OPENAI_API_ENDPOINTS = {
     "sentinel": "https://sentinel.openai.com/backend-api/sentinel/req",
     "signup": "https://auth.openai.com/api/accounts/authorize/continue",
     "register": "https://auth.openai.com/api/accounts/user/register",
+    "password_verify": "https://auth.openai.com/api/accounts/password/verify",
     "send_otp": "https://auth.openai.com/api/accounts/email-otp/send",
     "validate_otp": "https://auth.openai.com/api/accounts/email-otp/validate",
     "create_account": "https://auth.openai.com/api/accounts/create_account",
@@ -70,7 +71,8 @@ OPENAI_API_ENDPOINTS = {
 # OpenAI 页面类型（用于判断账号状态）
 OPENAI_PAGE_TYPES = {
     "EMAIL_OTP_VERIFICATION": "email_otp_verification",  # 已注册账号，需要 OTP 验证
-    "PASSWORD_REGISTRATION": "password",  # 新账号，需要设置密码
+    "PASSWORD_REGISTRATION": "create_account_password",  # 新账号，需要设置密码
+    "LOGIN_PASSWORD": "login_password",  # 登录流程，需要输入密码
 }
 
 # ============================================================================

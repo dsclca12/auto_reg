@@ -155,6 +155,8 @@ def create_mailbox(
             domain_override=extra.get("cfworker_domain_override", ""),
             domains=extra.get("cfworker_domains", ""),
             enabled_domains=extra.get("cfworker_enabled_domains", ""),
+            subdomain=extra.get("cfworker_subdomain", ""),
+            random_subdomain=extra.get("cfworker_random_subdomain", False),
             fingerprint=extra.get("cfworker_fingerprint", ""),
             custom_auth=extra.get("cfworker_custom_auth", ""),
             proxy=proxy,
@@ -931,6 +933,8 @@ class CFWorkerMailbox(BaseMailbox):
         domain_override: str = "",
         domains: Any = None,
         enabled_domains: Any = None,
+        subdomain: str = "",
+        random_subdomain: Any = False,
         fingerprint: str = "",
         custom_auth: str = "",
         proxy: str = None,
@@ -946,6 +950,8 @@ class CFWorkerMailbox(BaseMailbox):
             self.enabled_domains = [d for d in raw_enabled_domains if d in allowed]
         else:
             self.enabled_domains = raw_enabled_domains
+        self.subdomain = self._normalize_subdomain(subdomain)
+        self.random_subdomain = self._to_bool(random_subdomain)
         self.fingerprint = fingerprint
         self.custom_auth = custom_auth
         self.proxy = build_requests_proxy_config(proxy)
@@ -1032,6 +1038,21 @@ class CFWorkerMailbox(BaseMailbox):
             value = value[1:]
         return value
 
+    @staticmethod
+    def _normalize_subdomain(value: Any) -> str:
+        sub = str(value or "").strip().lower().strip(".")
+        if sub.startswith("@"):
+            sub = sub[1:]
+        parts = [part for part in sub.split(".") if part]
+        return ".".join(parts)
+
+    @staticmethod
+    def _to_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        text = str(value or "").strip().lower()
+        return text in {"1", "true", "yes", "on"}
+
     @classmethod
     def _parse_domains(cls, value: Any) -> list[str]:
         if not value:
@@ -1074,11 +1095,32 @@ class CFWorkerMailbox(BaseMailbox):
             return random.choice(self.enabled_domains)
         return self.domain
 
+    def _generate_subdomain_label(self, length: int = 6) -> str:
+        import string
+
+        alphabet = string.ascii_lowercase + string.digits
+        return "".join(random.choices(alphabet, k=length))
+
+    def _compose_domain(self, base_domain: str) -> str:
+        domain = self._normalize_domain(base_domain)
+        if not domain:
+            return ""
+
+        sub_parts: list[str] = []
+        if self.random_subdomain:
+            sub_parts.append(self._generate_subdomain_label())
+        if self.subdomain:
+            sub_parts.append(self.subdomain)
+
+        if not sub_parts:
+            return domain
+        return f"{'.'.join(sub_parts)}.{domain}"
+
     def get_email(self) -> MailboxAccount:
         self._ensure_api_configured()
         name = self._generate_local_part()
         payload = {"enablePrefix": True, "name": name}
-        selected_domain = self._pick_domain()
+        selected_domain = self._compose_domain(self._pick_domain())
         if selected_domain:
             payload["domain"] = selected_domain
             self._log(f"[CFWorker] 本次使用域名: {selected_domain}")

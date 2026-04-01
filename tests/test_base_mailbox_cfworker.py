@@ -74,6 +74,60 @@ class CFWorkerMailboxTests(unittest.TestCase):
             timeout=10,
         )
 
+    @patch("requests.request")
+    def test_get_email_uses_static_subdomain(self, mock_request):
+        mock_request.return_value.status_code = 200
+        mock_request.return_value.text = '{"email":"user@mail.sub.example","token":"token-123"}'
+        mock_request.return_value.json.return_value = {
+            "email": "user@mail.sub.example",
+            "token": "token-123",
+        }
+
+        mailbox = create_mailbox(
+            "cfworker",
+            extra={
+                "cfworker_api_url": "https://example.invalid",
+                "cfworker_admin_token": "admin-token",
+                "cfworker_domain": "sub.example",
+                "cfworker_subdomain": "mail",
+            },
+        )
+
+        mailbox.get_email()
+
+        self.assertEqual(
+            mock_request.call_args.kwargs["json"]["domain"],
+            "mail.sub.example",
+        )
+
+    @patch("requests.request")
+    def test_get_email_uses_random_subdomain(self, mock_request):
+        mock_request.return_value.status_code = 200
+        mock_request.return_value.text = '{"email":"user@rand.sub.example","token":"token-123"}'
+        mock_request.return_value.json.return_value = {
+            "email": "user@rand.sub.example",
+            "token": "token-123",
+        }
+
+        mailbox = create_mailbox(
+            "cfworker",
+            extra={
+                "cfworker_api_url": "https://example.invalid",
+                "cfworker_admin_token": "admin-token",
+                "cfworker_domain": "sub.example",
+                "cfworker_subdomain": "mail",
+                "cfworker_random_subdomain": True,
+            },
+        )
+
+        with patch.object(type(mailbox), "_generate_subdomain_label", return_value="rand"):
+            mailbox.get_email()
+
+        self.assertEqual(
+            mock_request.call_args.kwargs["json"]["domain"],
+            "rand.mail.sub.example",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

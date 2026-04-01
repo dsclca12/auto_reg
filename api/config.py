@@ -36,6 +36,8 @@ CONFIG_KEYS = [
     "cfworker_domain",
     "cfworker_domains",
     "cfworker_enabled_domains",
+    "cfworker_subdomain",
+    "cfworker_random_subdomain",
     "cfworker_fingerprint",
     "smstome_cookie",
     "smstome_country_slugs",
