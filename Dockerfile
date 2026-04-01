@@ -35,6 +35,14 @@ WORKDIR /app
 COPY requirements.txt ./
 COPY scripts/install_camoufox.py /tmp/install_camoufox.py
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates \
+    && curl -fsSL https://go.dev/dl/go1.24.2.linux-amd64.tar.gz | tar -C /usr/local -xz \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/usr/local/go/bin:/root/.local/bin:${PATH}"
+
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt \
     && installed=0 \
@@ -53,11 +61,14 @@ RUN pip install --upgrade pip \
 COPY . .
 COPY --from=frontend-builder /app/static /app/static
 
-RUN chmod +x /app/docker/entrypoint.sh \
-    && mkdir -p /runtime /runtime/logs /runtime/smstome_used /app/_ext_targets
+RUN apt-get update && apt-get install -y --no-install-recommends dos2unix git iproute2 procps \
+    && dos2unix /app/docker/entrypoint.sh \
+    && chmod +x /app/docker/entrypoint.sh \
+    && mkdir -p /runtime /runtime/logs /runtime/smstome_used /_ext_targets \
+    && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8000 8889
 
-VOLUME ["/runtime", "/app/_ext_targets"]
+VOLUME ["/runtime", "/_ext_targets"]
 
 ENTRYPOINT ["/app/docker/entrypoint.sh"]
