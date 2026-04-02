@@ -45,22 +45,17 @@
 
 ## 🙏 致谢
 
-本项目基于以下开源项目开发，在此衷心感谢原项目作者的贡献：
+本项目是在以下优秀开源项目基础上的三开版本，在此衷心感谢原作者们的贡献：
 
-- **原项目**：[lxf746/any-auto-register](https://github.com/lxf746/any-auto-register)
+- **一开项目**：[lxf746/any-auto-register](https://github.com/lxf746/any-auto-register) by @lxf746
+- **二开项目**：[zc-zhangchen/any-auto-register](https://github.com/zc-zhangchen/any-auto-register) by @zc-zhangchen
 - **临时邮箱方案**：[dreamhunter2333/cloudflare_temp_email](https://github.com/dreamhunter2333/cloudflare_temp_email)
 
-本项目在原项目基础上进行了功能扩展和优化，包括但不限于：
-- Sub2API 自动上传集成
-- 定时任务管理
-- 批量操作优化（支持 1000 个）
-- 随机延迟配置
-- 用户界面改进
-- 一键部署脚本
+本项目在前作基础上进行了功能扩展和优化。
 
 ---
 
-## 快速开始
+## 🚀 快速开始
 
 ### 环境要求
 

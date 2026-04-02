@@ -187,6 +187,17 @@ Maximum supports 1000 accounts per batch registration, recommended to use with r
 
 ---
 
+## 🙏 Acknowledgments
+
+This project is a third-generation fork based on the following outstanding open-source projects. We sincerely thank the original authors for their contributions:
+
+- **Original Project (1st Gen)**: [lxf746/any-auto-register](https://github.com/lxf746/any-auto-register) by @lxf746
+- **Second Fork (2nd Gen)**: [zc-zhangchen/any-auto-register](https://github.com/zc-zhangchen/any-auto-register) by @zc-zhangchen
+
+This project builds upon the work of previous generations with improvements and optimizations.
+
+---
+
 ## Development Guide
 
 ### Add New Platform
