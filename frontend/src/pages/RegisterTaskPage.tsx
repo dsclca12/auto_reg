@@ -190,7 +190,7 @@ export default function RegisterTaskPage() {
         platform: 'trae',
         executor_type: 'protocol',
         captcha_solver: 'yescaptcha',
-        mail_provider: 'luckmail',
+        mail_provider: 'freemail',
         count: 1,
         register_delay_seconds: 0,
         maliapi_base_url: 'https://maliapi.215.im/v1',

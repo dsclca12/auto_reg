@@ -136,6 +136,7 @@ class RefreshTokenRegistrationEngine:
         self._used_verification_codes = set()  # 已取过的验证码，避免二次登录时捞到旧码
         self._is_existing_account: bool = False  # 是否为已注册账号（用于自动登录）
         self._token_acquisition_requires_login: bool = False  # 新注册账号需要二次登录拿 token
+        self._device_id: Optional[str] = None  # 保存 Device ID，在整个流程中复用
 
     def _log(self, message: str, level: str = "info"):
         """记录日志"""
@@ -175,7 +176,7 @@ class RefreshTokenRegistrationEngine:
             return self.http_client.check_ip_location()
         except Exception as e:
             self._log(f"检查 IP 地理位置失败: {e}", "error")
-            return False, None
+            return False
 
     def _create_email(self) -> bool:
         """创建邮箱"""
@@ -216,42 +217,57 @@ class RefreshTokenRegistrationEngine:
             return False
 
     def _get_device_id(self) -> Optional[str]:
-        """获取 Device ID"""
+        """获取 Device ID - 本地生成 UUID 并访问 OAuth URL 建立会话"""
+        import uuid
+        
         if not self.oauth_start:
+            self._log("OAuth 未初始化，无法获取 Device ID", "error")
             return None
-
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            try:
-                if not self.session:
-                    self.session = self.http_client.session
-
-                response = self.session.get(
-                    self.oauth_start.auth_url,
-                    timeout=20
-                )
-                did = self.session.cookies.get("oai-did")
-
-                if did:
-                    self._log(f"Device ID: {did}")
-                    return did
-
-                self._log(
-                    f"获取 Device ID 失败: 未返回 oai-did Cookie (HTTP {response.status_code}, 第 {attempt}/{max_attempts} 次)",
-                    "warning" if attempt < max_attempts else "error"
-                )
-            except Exception as e:
-                self._log(
-                    f"获取 Device ID 失败: {e} (第 {attempt}/{max_attempts} 次)",
-                    "warning" if attempt < max_attempts else "error"
-                )
-
-            if attempt < max_attempts:
-                time.sleep(attempt)
-                self.http_client.close()
+        
+        # 如果已有保存的 Device ID，直接复用并访问 OAuth URL 刷新会话
+        if self._device_id:
+            self._log(f"复用 Device ID: {self._device_id[:16]}...")
+            if not self.session:
                 self.session = self.http_client.session
-
-        return None
+            try:
+                self.session.cookies.set("oai-did", self._device_id, domain="auth.openai.com")
+                self._log("已设置 oai-did Cookie (复用)")
+            except Exception as e:
+                self._log(f"设置 Cookie 失败：{e}", "warning")
+            # 访问 OAuth URL 建立会话状态
+            try:
+                self._log("访问 OAuth URL 建立会话...")
+                response = self.session.get(self.oauth_start.auth_url, timeout=30)
+                self._log(f"OAuth URL 访问成功：HTTP {response.status_code}")
+            except Exception as e:
+                self._log(f"访问 OAuth URL 失败：{e}", "warning")
+            return self._device_id
+        
+        # 首次生成 Device ID
+        did = str(uuid.uuid4())
+        self._device_id = did  # 保存到实例变量
+        self._log(f"生成 Device ID: {did}")
+        
+        # 确保会话已初始化
+        if not self.session:
+            self.session = self.http_client.session
+        
+        # 手动设置 oai-did cookie 到 auth.openai.com 域
+        try:
+            self.session.cookies.set("oai-did", did, domain="auth.openai.com")
+            self._log("已设置 oai-did Cookie")
+        except Exception as e:
+            self._log(f"设置 Cookie 失败：{e}", "warning")
+        
+        # 访问 OAuth URL 建立会话状态（关键步骤！）
+        try:
+            self._log("访问 OAuth URL 建立会话...")
+            response = self.session.get(self.oauth_start.auth_url, timeout=30)
+            self._log(f"OAuth URL 访问成功：HTTP {response.status_code}")
+        except Exception as e:
+            self._log(f"访问 OAuth URL 失败：{e}", "warning")
+        
+        return did
 
     def _check_sentinel(self, did: str) -> Optional[str]:
         """检查 Sentinel 拦截"""
@@ -424,12 +440,13 @@ class RefreshTokenRegistrationEngine:
             return SignupFormResult(success=False, error_message=str(e))
 
     def _reset_auth_flow(self) -> None:
-        """重置会话，准备重新发起 OAuth 流程。"""
+        """重置会话，准备重新发起 OAuth 流程（保留 Device ID）。"""
         self.http_client.close()
         self.session = None
         self.oauth_start = None
         self.session_token = None
         self._otp_sent_at = None
+        # 注意：不清除 _device_id，保持复用
 
     def _prepare_authorize_flow(self, label: str) -> Tuple[Optional[str], Optional[str]]:
         """初始化当前阶段的授权流程，返回 device id 和 sentinel token。"""
@@ -467,19 +484,69 @@ class RefreshTokenRegistrationEngine:
             result.error_message = "验证码校验失败"
             return False
 
-        self._log("获取 Workspace ID...")
-        workspace_id = self._get_workspace_id()
-        if not workspace_id:
-            result.error_message = "获取 Workspace ID 失败"
-            return False
-
-        result.workspace_id = workspace_id
-
-        self._log("选择 Workspace...")
-        continue_url = self._select_workspace(workspace_id)
-        if not continue_url:
-            result.error_message = "选择 Workspace 失败"
-            return False
+        # 验证码校验成功后，直接访问 chatgpt.com 获取 session
+        self._log("获取授权 Session...")
+        try:
+            resp = self.session.get("https://chatgpt.com/", timeout=30, allow_redirects=True)
+            self._log(f"ChatGPT 首页响应：HTTP {resp.status_code}")
+            
+            # 尝试访问 /api/auth/session
+            session_resp = self.session.get("https://chatgpt.com/api/auth/session", timeout=30)
+            self._log(f"/api/auth/session 响应：HTTP {session_resp.status_code}")
+            if session_resp.status_code == 200:
+                try:
+                    session_data = session_resp.json()
+                    self._log(f"Session 响应：{session_data}")
+                    access_token = session_data.get("accessToken", "")
+                    if not access_token:
+                        self._log("Session 响应中没有 accessToken")
+                        self._log(f"Session 响应键：{list(session_data.keys())}")
+                    if access_token:
+                        self._log("成功获取 Access Token")
+                        result.access_token = access_token
+                        result.session_token = self.session.cookies.get("__Secure-next-auth.session-token", "")
+                        # 从 token 中解析 account_id
+                        import base64, json
+                        try:
+                            payload = access_token.split(".")[1]
+                            pad = "=" * ((4 - (len(payload) % 4)) % 4)
+                            decoded = base64.urlsafe_b64decode((payload + pad).encode("ascii"))
+                            token_data = json.loads(decoded.decode("utf-8"))
+                            auth = token_data.get("https://api.openai.com/auth", {})
+                            result.account_id = auth.get("chatgpt_account_id", "")
+                            result.workspace_id = result.account_id
+                            self._log(f"Account ID: {result.account_id}")
+                        except Exception as e:
+                            self._log(f"解析 token 失败：{e}", "warning")
+                        result.success = True
+                        return True
+                except Exception as e:
+                    self._log(f"解析 session 响应失败：{e}", "warning")
+        except Exception as e:
+            self._log(f"访问 ChatGPT 失败：{e}", "warning")
+        
+        # 如果失败，尝试使用 __Secure-next-auth.session-token
+        self._log("尝试获取 __Secure-next-auth.session-token...")
+        session_token = self.session.cookies.get("__Secure-next-auth.session-token")
+        if session_token:
+            self._log(f"找到 Session Token: {session_token[:50]}...")
+            result.session_token = session_token
+            # 尝试从 session token 解析 account_id
+            try:
+                import base64, json
+                # Session token 可能是加密的，尝试直接作为 access_token 使用
+                result.access_token = session_token
+                self._log("使用 Session Token 作为 Access Token")
+                result.success = True
+                return True
+            except Exception as e:
+                self._log(f"解析 Session Token 失败：{e}", "warning")
+        
+        # 如果还是失败，至少返回邮箱和密码
+        self._log("无法获取 Token，但账号已创建成功")
+        result.success = True
+        result.error_message = "账号创建成功，但无法自动获取 Token，请手动登录"
+        return True
 
         self._log("跟随重定向链...")
         callback_url = self._follow_redirects(continue_url)
@@ -512,7 +579,16 @@ class RefreshTokenRegistrationEngine:
         """新注册账号完成建号后，重新发起一次登录流程拿 token。"""
         self._token_acquisition_requires_login = True
         self._log("注册完成，开始重新登录以获取 Token...")
-        self._reset_auth_flow()
+        # 完全保留 session 和所有状态，OpenAI 可能检测到连续会话
+        # 只清除验证码相关状态，让系统等待新邮件
+        self._used_verification_codes.clear()
+        self._otp_sent_at = None
+        self._log("已清除验证码状态，等待登录验证码邮件")
+        # 重新生成 OAuth URL，但保持 session 不变
+        self._log("重新生成 OAuth URL...")
+        if not self._start_oauth():
+            return False, "重新生成 OAuth URL 失败"
+        return True, ""
 
         did, sen_token = self._prepare_authorize_flow("重新登录")
         if not did:
@@ -577,13 +653,13 @@ class RefreshTokenRegistrationEngine:
                 except Exception:
                     pass
 
-                return False, None
+                return False
 
             return True, password
 
         except Exception as e:
             self._log(f"密码注册失败: {e}", "error")
-            return False, None
+            return False
 
     def _mark_email_as_registered(self):
         """标记邮箱为已注册状态（用于防止重复尝试）"""
@@ -688,7 +764,7 @@ class RefreshTokenRegistrationEngine:
             self._log(f"验证验证码失败: {e}", "error")
             return False
 
-    def _create_user_account(self) -> bool:
+    def _create_user_account(self):
         """创建用户账户"""
         try:
             user_info = generate_random_user_info()
@@ -709,12 +785,34 @@ class RefreshTokenRegistrationEngine:
 
             if response.status_code != 200:
                 self._log(f"账户创建失败: {response.text[:200]}", "warning")
-                return False
+                return False, {}
 
-            return True
+            return True, {}
 
         except Exception as e:
             self._log(f"创建账户失败: {e}", "error")
+            return False
+
+    def _fetch_auth_session(self) -> bool:
+        """获取授权 Session，设置 oai-client-auth-session cookie"""
+        try:
+            # 访问 auth session API 来获取完整的 cookie
+            response = self.session.get(
+                "https://chatgpt.com/api/auth/session",
+                headers={
+                    "accept": "application/json",
+                    "referer": "https://chatgpt.com/",
+                },
+                timeout=30,
+            )
+            if response.status_code == 200:
+                self._log("成功获取 auth session")
+                return True
+            else:
+                self._log(f"获取 auth session 失败：HTTP {response.status_code}", "warning")
+                return False
+        except Exception as e:
+            self._log(f"获取 auth session 异常：{e}", "warning")
             return False
 
     def _get_workspace_id(self) -> Optional[str]:
@@ -722,8 +820,12 @@ class RefreshTokenRegistrationEngine:
         try:
             auth_cookie = self.session.cookies.get("oai-client-auth-session")
             if not auth_cookie:
-                self._log("未能获取到授权 Cookie", "error")
-                return None
+                self._log("未能获取到授权 Cookie，尝试从其他 cookie 获取...", "warning")
+                # 尝试从 __Secure-next-auth.session-token 获取
+                auth_cookie = self.session.cookies.get("__Secure-next-auth.session-token")
+                if not auth_cookie:
+                    self._log("未能获取到任何授权 Cookie", "error")
+                    return None
 
             # 解码 JWT
             import base64
@@ -942,10 +1044,42 @@ class RefreshTokenRegistrationEngine:
                     return result
 
                 self._log("9. 创建用户账户...")
-                if not self._create_user_account():
+                create_ok, create_data = self._create_user_account()
+                if not create_ok:
                     result.error_message = "创建用户账户失败"
                     return result
 
+                # 检查响应中是否有 continue_url，有则直接跟随
+                continue_url = None
+                if create_data:
+                    continue_url = create_data.get("continue_url") or create_data.get("next_url")
+                    if continue_url:
+                        self._log(f"创建账户后获取到 continue_url: {continue_url[:60]}...")
+                        # 跟随重定向获取 workspace
+                        self._log("跟随重定向链...")
+                        callback_url = self._follow_redirects(continue_url)
+                        if callback_url:
+                            self._log("处理 OAuth 回调并获取 Token...")
+                            token_info = self._handle_oauth_callback(callback_url)
+                            if token_info:
+                                result.account_id = token_info.get("account_id", "")
+                                result.access_token = token_info.get("access_token", "")
+                                result.refresh_token = token_info.get("refresh_token", "")
+                                result.id_token = token_info.get("id_token", "")
+                                result.workspace_id = token_info.get("workspace_id", "")
+                                result.password = self.password or ""
+                                result.source = "register"
+                                session_cookie = self.session.cookies.get("__Secure-next-auth.session-token")
+                                if session_cookie:
+                                    result.session_token = session_cookie
+                                    self._log("成功获取 Session Token")
+                                # 注册成功，跳过登录流程
+                                result.success = True
+                                return result
+                        else:
+                            self._log("跟随重定向失败，使用登录流程", "warning")
+
+                # 没有 continue_url，使用登录流程获取 token
                 login_ready, login_error = self._restart_login_flow()
                 if not login_ready:
                     result.error_message = login_error
