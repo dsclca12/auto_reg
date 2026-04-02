@@ -1,4 +1,4 @@
-[🇹🇼 中文版本](README_CN.md)
+[ 中文版本](README_CN.md)
 
 
 # Any Auto Register
