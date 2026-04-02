@@ -123,17 +123,21 @@ def _to_int(v: Any) -> int:
         return 0
 
 
+# 可用的 Chrome 指纹版本列表
+_CHROME_IMPERSONATES = ["chrome131", "chrome133", "chrome136", "chrome124", "chrome120"]
+
 def _post_form(
-    url: str, data: Dict[str, str], timeout: int = 30, proxy_url: Optional[str] = None
+    url: str, data: Dict[str, str], timeout: int = 30, proxy_url: Optional[str] = None, max_retries: int = 3
 ) -> Dict[str, Any]:
     """
-    发送 POST 表单请求
+    发送 POST 表单请求（带重试机制）
 
     Args:
         url: 请求 URL
         data: 表单数据
         timeout: 超时时间
         proxy_url: 代理 URL
+        max_retries: 最大重试次数
 
     Returns:
         响应 JSON 数据
@@ -148,26 +152,53 @@ def _post_form(
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     }
 
-    try:
-        # 使用 curl_cffi 发送请求，支持代理和浏览器指纹
-        response = cffi_requests.post(
-            url,
-            data=data,
-            headers=headers,
-            timeout=timeout,
-            proxies=proxies,
-            impersonate="chrome",
-        )
-
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"token exchange failed: {response.status_code}: {response.text}"
+    last_error = None
+    
+    # 尝试不同的 Chrome 指纹版本
+    for attempt in range(max_retries):
+        # 轮换 Chrome 指纹版本
+        impersonate_version = _CHROME_IMPERSONATES[attempt % len(_CHROME_IMPERSONATES)]
+        
+        try:
+            # 使用 curl_cffi 发送请求，支持代理和浏览器指纹
+            response = cffi_requests.post(
+                url,
+                data=data,
+                headers=headers,
+                timeout=timeout,
+                proxies=proxies,
+                impersonate=impersonate_version,
             )
 
-        return response.json()
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"token exchange failed: {response.status_code}: {response.text}"
+                )
 
-    except cffi_requests.RequestsError as e:
-        raise RuntimeError(f"token exchange failed: network error: {e}") from e
+            return response.json()
+
+        except cffi_requests.RequestsError as e:
+            error_msg = str(e)
+            is_tls_error = "TLS" in error_msg or "SSL" in error_msg or "curl: (35)" in error_msg
+            
+            last_error = e
+            
+            if is_tls_error and attempt < max_retries - 1:
+                # TLS 错误，尝试下一个 Chrome 版本
+                import time
+                time.sleep(0.5 * (attempt + 1))  # 递增延迟
+                continue
+            elif attempt < max_retries - 1:
+                # 其他错误，短暂等待后重试
+                import time
+                time.sleep(0.5)
+                continue
+            else:
+                # 最后一次尝试，返回错误
+                raise RuntimeError(f"token exchange failed: network error: {e}") from e
+    
+    # 理论上不会到这里
+    raise RuntimeError(f"token exchange failed: network error: {last_error}") from last_error
 
 
 @dataclass(frozen=True)
