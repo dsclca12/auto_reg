@@ -27,7 +27,6 @@ This project is a third-generation fork based on the following outstanding open-
 - [项目结构](#项目结构)
 - [Electron 开发说明](#electron-开发说明)
 - [License](#license)
-- [用户讨论群](#用户讨论群)
 - [Star History](#star-history)
 
 ---
