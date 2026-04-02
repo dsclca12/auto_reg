@@ -215,7 +215,7 @@ SKYMAIL_DOMAIN=your_domain
 
 | Service | Identifier | Description | Configuration Required |
 |---------|------------|-------------|----------------------|
-| **LuckMail** | `luckmail` | Free 125 emails for testing, daily check-in for more | Yes |
+| **LuckMail** | `luckmail` | Temporary email service with API-based access | Yes |
 | **MoeMail** | `moemail` | Default option, auto-register temporary email | Yes |
 | **TempMail.lol** | `tempmail_lol` | Temporary email, may require proxy in some regions | No |
 | **SkyMail (CloudMail)** | `skymail` | Use via API/Token/Domain | Yes |
