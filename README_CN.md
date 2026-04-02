@@ -560,9 +560,21 @@ GROK2API_PORT_BIND=8011
 
 ## 📄 许可证
 
-MIT License
+**MIT License**
 
-详见 [LICENSE](LICENSE) 文件。
+详见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE) 文件。
+
+### 版权所有者
+- Copyright (c) 2024-present dsclca12（当前维护者）
+- Copyright (c) 2024 zc-zhangchen（二开作者）
+- Copyright (c) 2024 lxf746（一开作者）
+
+### 上游项目
+- [lxf746/any-auto-register](https://github.com/lxf746/any-auto-register) - 一开项目（MIT）
+- [zc-zhangchen/any-auto-register](https://github.com/zc-zhangchen/any-auto-register) - 二开项目（MIT）
+
+### 附加条款
+本项目仅供**学习和技术研究使用**，不得用于任何商业用途或非法用途。完整免责声明见 [LICENSE](LICENSE) 文件。
 
 ---
 

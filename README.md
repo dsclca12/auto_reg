@@ -558,9 +558,21 @@ Contributions are welcome! Please follow these guidelines:
 
 ## 📄 License
 
-MIT License
+**MIT License**
 
-See [LICENSE](LICENSE) file for details.
+See [LICENSE](LICENSE) and [NOTICE](NOTICE) files for details.
+
+### Copyright Holders
+- Copyright (c) 2024-present dsclca12 (Current Maintainer)
+- Copyright (c) 2024 zc-zhangchen (Second Fork Author)
+- Copyright (c) 2024 lxf746 (Original Author)
+
+### Upstream Projects
+- [lxf746/any-auto-register](https://github.com/lxf746/any-auto-register) - Original Project (MIT)
+- [zc-zhangchen/any-auto-register](https://github.com/zc-zhangchen/any-auto-register) - Second Fork (MIT)
+
+### Additional Terms
+This project is for **learning and research purposes only**. It shall not be used for any commercial or illegal purposes. See [LICENSE](LICENSE) for full disclaimer.
 
 ---
 
