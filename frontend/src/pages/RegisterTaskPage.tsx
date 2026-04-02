@@ -50,6 +50,9 @@ export default function RegisterTaskPage() {
         laoudo_auth: cfg.laoudo_auth || '',
         laoudo_email: cfg.laoudo_email || '',
         laoudo_account_id: cfg.laoudo_account_id || '',
+        gptmail_base_url: cfg.gptmail_base_url || 'https://mail.chatgpt.org.uk',
+        gptmail_api_key: cfg.gptmail_api_key || '',
+        gptmail_domain: cfg.gptmail_domain || '',
         maliapi_base_url: cfg.maliapi_base_url || 'https://maliapi.215.im/v1',
         maliapi_api_key: cfg.maliapi_api_key || '',
         maliapi_domain: cfg.maliapi_domain || '',
@@ -89,6 +92,9 @@ export default function RegisterTaskPage() {
       laoudo_auth: values.laoudo_auth,
       laoudo_email: values.laoudo_email,
       laoudo_account_id: values.laoudo_account_id,
+      gptmail_base_url: values.gptmail_base_url,
+      gptmail_api_key: values.gptmail_api_key,
+      gptmail_domain: values.gptmail_domain,
       maliapi_base_url: values.maliapi_base_url,
       maliapi_api_key: values.maliapi_api_key,
       maliapi_domain: values.maliapi_domain,
@@ -191,6 +197,7 @@ export default function RegisterTaskPage() {
         executor_type: 'protocol',
         captcha_solver: 'yescaptcha',
         mail_provider: 'luckmail',
+        gptmail_base_url: 'https://mail.chatgpt.org.uk',
         count: 1,
         register_delay_seconds: 0,
         maliapi_base_url: 'https://maliapi.215.im/v1',
@@ -255,6 +262,7 @@ export default function RegisterTaskPage() {
                 { value: 'tempmail_lol', label: 'TempMail.lol' },
                 { value: 'skymail', label: 'SkyMail (CloudMail)' },
                 { value: 'maliapi', label: 'YYDS Mail / MaliAPI' },
+                { value: 'gptmail', label: 'GPTMail' },
                 { value: 'duckmail', label: 'DuckMail' },
                 { value: 'freemail', label: 'Freemail' },
                 { value: 'laoudo', label: 'Laoudo' },
@@ -307,6 +315,23 @@ export default function RegisterTaskPage() {
                     { value: 'prefer_public', label: 'prefer_public' },
                   ]}
                 />
+              </Form.Item>
+            </>
+          )}
+          {mailProvider === 'gptmail' && (
+            <>
+              <Form.Item name="gptmail_base_url" label="API URL">
+                <Input placeholder="https://mail.chatgpt.org.uk" />
+              </Form.Item>
+              <Form.Item name="gptmail_api_key" label="API Key">
+                <Input.Password placeholder="gpt-test" />
+              </Form.Item>
+              <Form.Item
+                name="gptmail_domain"
+                label="邮箱域名（可选）"
+                extra="已知当前可用域名时可直接本地拼装随机地址，省掉一次 generate-email 请求"
+              >
+                <Input placeholder="example.com" />
               </Form.Item>
             </>
           )}

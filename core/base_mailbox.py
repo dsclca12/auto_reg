@@ -187,6 +187,13 @@ def create_mailbox(
             auto_domain_strategy=extra.get("maliapi_auto_domain_strategy", ""),
             proxy=proxy,
         )
+    elif provider == "gptmail":
+        return GPTMailMailbox(
+            api_url=extra.get("gptmail_base_url", "https://mail.chatgpt.org.uk"),
+            api_key=extra.get("gptmail_api_key", ""),
+            domain=extra.get("gptmail_domain", ""),
+            proxy=proxy,
+        )
     elif provider == "cfworker":
         return CFWorkerMailbox(
             api_url=extra.get("cfworker_api_url", ""),
@@ -975,6 +982,201 @@ class MaliAPIMailbox(BaseMailbox):
                     code = self._safe_extract(search_text, code_pattern)
                     if code:
                         self._log(f"[MaliAPI] 收到验证码: {code}")
+                        return code
+            except Exception:
+                pass
+            return None
+
+        return self._run_polling_wait(
+            timeout=timeout,
+            poll_interval=3,
+            poll_once=poll_once,
+        )
+
+
+class GPTMailMailbox(BaseMailbox):
+    """GPTMail 临时邮箱服务"""
+
+    def __init__(
+        self,
+        api_url: str = "https://mail.chatgpt.org.uk",
+        api_key: str = "",
+        domain: str = "",
+        proxy: str = None,
+    ):
+        self.api = (api_url or "https://mail.chatgpt.org.uk").rstrip("/")
+        self.api_key = str(api_key or "").strip()
+        self.domain = self._normalize_domain(domain)
+        self.proxy = build_requests_proxy_config(proxy)
+        self._email = None
+
+    @staticmethod
+    def _normalize_domain(value: Any) -> str:
+        domain = str(value or "").strip().lower()
+        if domain.startswith("@"):
+            domain = domain[1:]
+        return domain
+
+    @staticmethod
+    def _generate_local_part() -> str:
+        import string
+
+        prefix = "".join(random.choices(string.ascii_lowercase, k=6))
+        suffix = "".join(random.choices(string.digits, k=4))
+        return f"{prefix}{suffix}"
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"accept": "application/json"}
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        return headers
+
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict | None = None,
+        json_body: dict | None = None,
+        timeout: int = 15,
+    ) -> Any:
+        import requests
+
+        response = requests.request(
+            method,
+            f"{self.api}{path}",
+            params=params,
+            json=json_body,
+            headers=self._headers(),
+            proxies=self.proxy,
+            timeout=timeout,
+        )
+        try:
+            payload = response.json()
+        except Exception as exc:
+            preview = (response.text or "")[:200]
+            raise RuntimeError(
+                f"GPTMail API {path} 返回非 JSON: HTTP {response.status_code} {preview}"
+            ) from exc
+
+        if response.status_code >= 400:
+            error = payload.get("error") if isinstance(payload, dict) else ""
+            message = str(error or response.text or f"HTTP {response.status_code}").strip()
+            raise RuntimeError(f"GPTMail API {path} 失败: {message}")
+
+        if isinstance(payload, dict) and payload.get("success") is False:
+            error = str(payload.get("error") or "unknown error").strip()
+            raise RuntimeError(f"GPTMail API {path} 失败: {error}")
+
+        if isinstance(payload, dict) and "data" in payload:
+            return payload.get("data")
+        return payload
+
+    def _list_messages(self, email: str) -> list[dict]:
+        data = self._request_json("GET", "/api/emails", params={"email": email}, timeout=10)
+        if isinstance(data, dict):
+            messages = data.get("emails", [])
+        else:
+            messages = data
+        return [item for item in (messages or []) if isinstance(item, dict)]
+
+    def _get_message_detail(self, message_id: str) -> dict[str, Any]:
+        data = self._request_json("GET", f"/api/email/{message_id}", timeout=10)
+        return data if isinstance(data, dict) else {}
+
+    def get_email(self) -> MailboxAccount:
+        if self.domain:
+            email = f"{self._generate_local_part()}@{self.domain}"
+            self._email = email
+            self._log(f"[GPTMail] 本地拼装邮箱: {email}")
+            return MailboxAccount(
+                email=email,
+                account_id=email,
+                extra={"provider": "gptmail", "domain": self.domain, "local_address": True},
+            )
+
+        data = self._request_json("GET", "/api/generate-email")
+        if not isinstance(data, dict):
+            raise RuntimeError(f"GPTMail 返回异常: {data}")
+
+        email = str(data.get("email") or "").strip()
+        if not email:
+            raise RuntimeError(f"GPTMail 返回空邮箱: {data}")
+
+        self._email = email
+        self._log(f"[GPTMail] 生成邮箱: {email}")
+        return MailboxAccount(
+            email=email,
+            account_id=email,
+            extra={"provider": "gptmail"},
+        )
+
+    def get_current_ids(self, account: MailboxAccount) -> set:
+        try:
+            return {
+                str(message.get("id"))
+                for message in self._list_messages(account.email)
+                if message.get("id") is not None
+            }
+        except Exception:
+            return set()
+
+    def wait_for_code(
+        self,
+        account: MailboxAccount,
+        keyword: str = "",
+        timeout: int = 120,
+        before_ids: set = None,
+        code_pattern: str = None,
+        **kwargs,
+    ) -> str:
+        import re
+
+        seen = {str(mid) for mid in (before_ids or set())}
+        exclude_codes = {
+            str(code) for code in (kwargs.get("exclude_codes") or set()) if code
+        }
+
+        def poll_once() -> Optional[str]:
+            try:
+                messages = self._list_messages(account.email)
+                for message in messages:
+                    message_id = str(message.get("id") or "").strip()
+                    if not message_id or message_id in seen:
+                        continue
+                    seen.add(message_id)
+
+                    try:
+                        detail = self._get_message_detail(message_id)
+                    except Exception:
+                        detail = {}
+
+                    search_text = " ".join(
+                        [
+                            str(message.get("subject") or ""),
+                            str(message.get("from_address") or ""),
+                            str(message.get("content") or ""),
+                            str(message.get("html_content") or ""),
+                            str(detail.get("subject") or ""),
+                            str(detail.get("content") or ""),
+                            str(detail.get("html_content") or ""),
+                            str(detail.get("raw_headers") or ""),
+                        ]
+                    ).strip()
+                    search_text = self._decode_raw_content(search_text) or search_text
+                    search_text = re.sub(
+                        r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+                        "",
+                        search_text,
+                    )
+                    if keyword and keyword.lower() not in search_text.lower():
+                        continue
+
+                    code = self._safe_extract(search_text, code_pattern)
+                    if code and code in exclude_codes:
+                        continue
+                    if code:
+                        self._log(f"[GPTMail] 收到验证码: {code}")
                         return code
             except Exception:
                 pass
