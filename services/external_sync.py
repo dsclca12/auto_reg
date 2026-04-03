@@ -67,15 +67,12 @@ def sync_account(account) -> list[dict[str, Any]]:
         sub2api_key = str(config_store.get("sub2api_api_key", "") or "").strip()
         if sub2api_url and sub2api_key:
             from platforms.chatgpt.sub2api_upload import upload_to_sub2api
-            from services.chatgpt_sync import persist_sub2api_sync_result
 
             ok, msg = upload_to_sub2api(
                 upload_account,
                 api_url=sub2api_url,
                 api_key=sub2api_key,
             )
-            # 持久化同步结果
-            persist_sub2api_sync_result(account, ok, msg)
             results.append({"name": "Sub2API", "ok": ok, "msg": msg})
 
     elif platform == "grok":

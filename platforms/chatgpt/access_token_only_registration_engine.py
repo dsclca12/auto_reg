@@ -16,88 +16,6 @@ from .utils import generate_random_name, generate_random_birthday
 
 logger = logging.getLogger(__name__)
 
-# 注册失败错误建议映射表
-REGISTRATION_ERROR_SUGGESTIONS = {
-    "registration_disallowed": (
-        "【账号创建被拒绝】OpenAI 服务端风控拦截",
-        [
-            "🔄 更换代理 IP（当前 IP 可能被标记，建议使用住宅代理）",
-            "📧 更换邮箱服务商（临时邮箱域名可能已被拉黑，建议使用自建邮箱如 CF Worker）",
-            "⏱️ 降低注册频率，增加随机延迟（建议 30-60 秒）",
-            "🔃 清除浏览器数据或更换设备指纹",
-            "📋 减少批量注册数量（建议每批不超过 5 个账号）"
-        ]
-    ),
-    "invalid_request_error": (
-        "【无效请求】注册请求被服务端拒绝",
-        [
-            "🔄 检查代理配置是否正确",
-            "📧 验证邮箱地址格式是否有效",
-            "🔐 确保密码强度符合要求（至少 8 位，包含大小写字母和数字）",
-            "🌐 检查网络连接是否稳定"
-        ]
-    ),
-    "captcha_required": (
-        "【需要验证码】触发 Cloudflare 验证码验证",
-        [
-            "🤖 检查验证码服务（YesCaptcha/本地 Solver）是否正常运行",
-            "🔄 更换代理 IP 可能降低验证码触发概率",
-            "⏱️ 增加请求间隔，模拟真人操作"
-        ]
-    ),
-    "email_verification_failed": (
-        "【邮箱验证失败】无法接收或验证邮箱验证码",
-        [
-            "📧 检查邮箱服务配置是否正确",
-            "🔄 更换邮箱服务商重试",
-            "⏱️ 增加验证码等待时间（建议 60-90 秒）",
-            "📬 检查邮箱是否已满或无法接收新邮件"
-        ]
-    ),
-    "rate_limit": (
-        "【频率限制】注册请求过于频繁",
-        [
-            "⏱️ 大幅增加注册间隔（建议 2-5 分钟）",
-            "🔄 更换代理 IP",
-            "📉 减少并发注册任务数量"
-        ]
-    ),
-    "tls_error": (
-        "【TLS/SSL 错误】网络连接或证书问题",
-        [
-            "🔄 检查代理是否可用",
-            "🌐 验证网络连接是否正常",
-            "🔧 更新 curl_cffi 和浏览器依赖"
-        ]
-    ),
-}
-
-
-def get_error_suggestion(error_message: str) -> tuple[str, list[str]]:
-    """
-    根据错误信息获取用户友好的建议
-    
-    Args:
-        error_message: 错误信息
-        
-    Returns:
-        tuple[错误说明，建议列表]
-    """
-    text = str(error_message or "").lower()
-    
-    # 匹配具体错误类型
-    for error_key, (description, suggestions) in REGISTRATION_ERROR_SUGGESTIONS.items():
-        if error_key.lower() in text:
-            return description, suggestions
-    
-    # 默认建议
-    return "注册失败", [
-        "🔄 尝试更换代理 IP",
-        "📧 尝试更换邮箱服务商",
-        "⏱️ 增加注册间隔延迟",
-        "📖 查看 README.md 获取更多故障排除建议"
-    ]
-
 class EmailServiceAdapter:
     """\u5c06 V1 \u7684 email_service \u9002\u914d\u6210 V2 \u6240\u9700\u7684\u63a5\u7801\u63a5\u53e3\u3002"""
     def __init__(self, email_service, email, log_fn):
@@ -229,13 +147,6 @@ class AccessTokenOnlyRegistrationEngine:
 
                     if not success:
                         last_error = f"注册流失败: {msg}"
-                        
-                        # 获取错误建议并输出
-                        error_desc, suggestions = get_error_suggestion(msg)
-                        self._log(f"❌ {error_desc}")
-                        self._log("💡 建议尝试以下操作：")
-                        for suggestion in suggestions:
-                            self._log(f"   {suggestion}")
                         if attempt < self.max_retries - 1 and self._should_retry(msg):
                             self._log(f"注册流失败，准备整流程重试: {msg}")
                             continue

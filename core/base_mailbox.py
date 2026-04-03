@@ -27,7 +27,10 @@ class BaseMailbox(ABC):
         task_control = getattr(self, "_task_control", None)
         if task_control is None:
             return
-        task_control.checkpoint(consume_skip=consume_skip)
+        task_control.checkpoint(
+            consume_skip=consume_skip,
+            attempt_id=getattr(self, "_task_attempt_token", None),
+        )
 
     def _sleep_with_checkpoint(self, seconds: float) -> None:
         remaining = max(float(seconds or 0), 0.0)
@@ -139,7 +142,72 @@ class BaseMailbox(ABC):
     def get_current_ids(self, account: MailboxAccount) -> set:
         """返回当前邮件 ID 集合（用于过滤旧邮件）"""
         ...
+    def _yyds_safe_extract(self, text: str, pattern: str = None) -> Optional[str]:
+        """通用验证码提取逻辑：若有捕获组则返回 group(1)，否则返回 group(0)"""
+        import re
 
+        text = str(text or "")
+        if not text:
+            return None
+
+        # [修复点 1]：优先过滤掉所有 URL 链接，直接从根源防止提取到追踪链接（如 SendGrid）里的随机数字
+        text = re.sub(r"https?://\S+", "", text)
+
+        patterns = []
+        if pattern:
+            # [修复点 2]：如果外部传入了纯 \d{6} 的粗糙正则，自动为其加上字母数字边界
+            if pattern in (r"\d{6}", r"(\d{6})"):
+                patterns.append(r"(?<![a-zA-Z0-9])(\d{6})(?![a-zA-Z0-9])")
+            else:
+                patterns.append(pattern)
+
+        # 先匹配带明显语义的验证码，避免误提取 MIME boundary、时间戳等 6 位数字。
+        patterns.extend(
+            [
+                r"(?is)(?:verification\s+code|one[-\s]*time\s+(?:password|code)|security\s+code|login\s+code|验证码|校验码|动态码|認證碼|驗證碼)[^0-9]{0,30}(\d{6})",
+                r"(?is)\bcode\b[^0-9]{0,12}(\d{6})",
+                # [修复点 3]：修改兜底正则，严格要求 6 位数字前后不能有字母或数字（防止匹配 u20216706）
+                r"(?<![a-zA-Z0-9])(\d{6})(?![a-zA-Z0-9])",
+            ]
+        )
+
+        for regex in patterns:
+            m = re.search(regex, text)
+            if m:
+                # 兼容逻辑：若 pattern 中有捕获组则取 group(1)，否则取 group(0)
+                return m.group(1) if m.groups() else m.group(0)
+        return None
+
+    def _yyds_decode_raw_content(self, raw: str) -> str:
+        """解析邮件原始文本 (借鉴自 Fugle)，处理 Quoted-Printable 和 HTML 实体"""
+        import quopri, html, re
+
+        text = str(raw or "")
+        if not text:
+            return ""
+            
+        # [修复点 4]：只有在明确包含常见邮件 Header 时，才进行 \r\n\r\n 切分。
+        # 否则会误删 MaliAPI 等直接返回的已解析 JSON 正文内容（遇到普通的正文换行就错误截断了）
+        if re.search(r"(?im)^(?:Return-Path|Received|Date|From|To|Subject|Content-Type):", text):
+            if "\r\n\r\n" in text:
+                text = text.split("\r\n\r\n", 1)[1]
+            elif "\n\n" in text:
+                text = text.split("\n\n", 1)[1]
+                
+        try:
+            # 处理 Quoted-Printable
+            decoded_bytes = quopri.decodestring(text)
+            text = decoded_bytes.decode("utf-8", errors="ignore")
+        except Exception:
+            pass
+        # 清除 HTML 标签并反转义
+        text = html.unescape(text)
+        text = re.sub(r"(?im)^content-(?:type|transfer-encoding):.*$", " ", text)
+        text = re.sub(r"(?im)^--+[_=\w.-]+$", " ", text)
+        text = re.sub(r"(?i)----=_part_[\w.]+", " ", text)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
 
 def create_mailbox(
     provider: str, extra: dict = None, proxy: str = None
@@ -753,9 +821,38 @@ class DuckMailMailbox(BaseMailbox):
         code_pattern: str = None,
         **kwargs,
     ) -> str:
+        from datetime import datetime
         import re
 
         seen = set(before_ids or [])
+        exclude_codes = {
+            str(code).strip()
+            for code in (kwargs.get("exclude_codes") or set())
+            if str(code or "").strip()
+        }
+        otp_sent_at = kwargs.get("otp_sent_at")
+
+        def _parse_message_timestamp(*values) -> Optional[float]:
+            for value in values:
+                if value in (None, ""):
+                    continue
+                if isinstance(value, (int, float)):
+                    numeric = float(value)
+                    return numeric / 1000 if numeric > 10_000_000_000 else numeric
+                text = str(value).strip()
+                if not text:
+                    continue
+                try:
+                    numeric = float(text)
+                    return numeric / 1000 if numeric > 10_000_000_000 else numeric
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    normalized = text.replace("Z", "+00:00")
+                    return datetime.fromisoformat(normalized).timestamp()
+                except ValueError:
+                    continue
+            return None
 
         def poll_once() -> Optional[str]:
             try:
@@ -778,11 +875,30 @@ class DuckMailMailbox(BaseMailbox):
                             + str(detail.get("subject") or "")
                         )
                     except Exception:
+                        detail = {}
                         body = str(msg.get("subject") or "")
+                    message_ts = _parse_message_timestamp(
+                        detail.get("createdAt"),
+                        detail.get("created_at"),
+                        detail.get("receivedAt"),
+                        detail.get("received_at"),
+                        detail.get("date"),
+                        detail.get("created"),
+                        msg.get("createdAt"),
+                        msg.get("created_at"),
+                        msg.get("receivedAt"),
+                        msg.get("received_at"),
+                        msg.get("date"),
+                        msg.get("created"),
+                    )
+                    if otp_sent_at and message_ts and message_ts < float(otp_sent_at):
+                        continue
                     body = re.sub(
                         r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "", body
                     )
                     code = self._safe_extract(body, code_pattern)
+                    if code and code in exclude_codes:
+                        continue
                     if code:
                         return code
             except Exception:
@@ -970,7 +1086,7 @@ class MaliAPIMailbox(BaseMailbox):
                             str(message.get("snippet") or ""),
                         ]
                     ).strip()
-                    search_text = self._decode_raw_content(search_text) or search_text
+                    search_text = self._yyds_decode_raw_content(search_text) or search_text
                     search_text = re.sub(
                         r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
                         "",
@@ -979,7 +1095,7 @@ class MaliAPIMailbox(BaseMailbox):
                     if keyword and keyword.lower() not in search_text.lower():
                         continue
 
-                    code = self._safe_extract(search_text, code_pattern)
+                    code = self._yyds_safe_extract(search_text, code_pattern)
                     if code:
                         self._log(f"[MaliAPI] 收到验证码: {code}")
                         return code
@@ -2029,9 +2145,12 @@ class FreemailMailbox(BaseMailbox):
         **kwargs,
     ) -> str:
         seen = set(before_ids or [])
-        # 获取排除的验证码列表
-        exclude_codes = {str(code).strip() for code in (kwargs.get("exclude_codes") or set()) if code}
-        
+        exclude_codes = {
+            str(code).strip()
+            for code in (kwargs.get("exclude_codes") or set())
+            if str(code or "").strip()
+        }
+
         def poll_once() -> Optional[str]:
             try:
                 r = self._session.get(
@@ -2045,10 +2164,9 @@ class FreemailMailbox(BaseMailbox):
                         continue
                     seen.add(mid)
                     # 直接用 verification_code 字段
-                    code = str(msg.get("verification_code") or "")
+                    code = str(msg.get("verification_code") or "").strip()
                     if code and code != "None":
-                        # 检查是否在排除列表中
-                        if exclude_codes and code in exclude_codes:
+                        if code in exclude_codes:
                             continue
                         return code
                     # 兜底：从 preview 提取
@@ -2057,8 +2175,7 @@ class FreemailMailbox(BaseMailbox):
                     )
                     code = self._safe_extract(text, code_pattern)
                     if code:
-                        # 检查是否在排除列表中
-                        if exclude_codes and code in exclude_codes:
+                        if code in exclude_codes:
                             continue
                         return code
             except Exception:
