@@ -835,14 +835,47 @@ class RefreshTokenRegistrationEngine:
             # 记录发送时间戳
             self._otp_sent_at = time.time()
 
-            response = self.session.get(
+            # 先访问页面获取 Cloudflare Cookie
+            try:
+                page_url = "https://auth.openai.com/create-account/password"
+                nav_headers = self._build_navigation_headers(referer=page_url)
+                page_resp = self.session.get(
+                    page_url,
+                    headers=nav_headers,
+                    allow_redirects=True,
+                    timeout=15,
+                )
+                self._log(f"发送验证码前：页面访问状态: {page_resp.status_code}")
+                time.sleep(random.uniform(1.0, 2.0))
+            except Exception as page_err:
+                self._log(f"发送验证码前：页面访问异常（继续尝试）: {page_err}")
+
+            # 使用 POST 请求发送验证码
+            headers = self._build_json_headers(
+                referer="https://auth.openai.com/create-account/password",
+                include_device_id=True,
+                include_datadog=True,
+            )
+            sen_token = self._check_sentinel(
+                self._device_id or "",
+                flow="email_otp_send",
+            )
+            if sen_token:
+                headers["openai-sentinel-token"] = sen_token
+
+            response = self.session.post(
                 OPENAI_API_ENDPOINTS["send_otp"],
-                headers=self._build_navigation_headers(
-                    referer="https://auth.openai.com/create-account/password"
-                ),
+                headers=headers,
+                data=json.dumps({}),
             )
 
             self._log(f"验证码发送状态: {response.status_code}")
+            
+            # 等待邮件服务器接收邮件（邮件发送需要时间）
+            wait_time = random.uniform(3.0, 6.0)
+            self._log(f"等待邮件到达: {wait_time:.1f}秒...")
+            time.sleep(wait_time)
+            
             return response.status_code == 200
 
         except Exception as e:
