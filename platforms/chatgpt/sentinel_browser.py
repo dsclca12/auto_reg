@@ -51,7 +51,8 @@ def get_sentinel_token_via_browser(
     if proxy_config:
         launch_args["proxy"] = proxy_config
 
-    logger(f"Sentinel Browser 启动: flow={flow}, url={target_url}")
+    logger(f"Sentinel Browser 启动: flow={flow}, url={target_url}, headless={headless}")
+    logger(f"Sentinel Browser 启动参数: {launch_args}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(**launch_args)

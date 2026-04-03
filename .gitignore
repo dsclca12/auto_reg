@@ -56,3 +56,9 @@ CLAUDE.md
 .ace-tool/
 smstome*_numbers.txt
 smstome_used/
+
+# 优化文档（不上传到 Git）
+HUMAN_BEHAVIOR_OPTIMIZATION.md
+OPTIMIZATION_SUMMARY.md
+QUICKSTART.md
+verify_optimization.py

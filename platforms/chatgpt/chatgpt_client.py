@@ -3,6 +3,7 @@ ChatGPT 注册客户端模块
 使用 curl_cffi 模拟浏览器行为
 """
 
+import os
 import random
 import uuid
 import time
@@ -134,11 +135,14 @@ class ChatGPTClient:
     def _get_sentinel_token(self, flow: str, *, page_url: str | None = None):
         prefer_browser = flow in {"username_password_create", "oauth_create_account"}
         if prefer_browser:
+            # 服务器无 XServer，必须强制 headless
+            has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+            force_headless = not has_display
             token = get_sentinel_token_via_browser(
                 flow=flow,
                 proxy=self.proxy,
                 page_url=page_url,
-                headless=self.browser_mode != "headed",
+                headless=force_headless,
                 device_id=self.device_id,
                 log_fn=lambda msg: self._log(msg),
             )

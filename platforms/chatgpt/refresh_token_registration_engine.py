@@ -6,6 +6,7 @@
 import base64
 import json
 import logging
+import random
 import secrets
 import time
 import urllib.parse
@@ -339,10 +340,14 @@ class RefreshTokenRegistrationEngine:
             if not self.session:
                 self.session = self.http_client.session
             if flow in {"username_password_create", "oauth_create_account"}:
+                # 服务器无 XServer，必须强制 headless
+                import os
+                has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+                force_headless = not has_display
                 browser_token = get_sentinel_token_via_browser(
                     flow=flow,
                     proxy=self.proxy_url,
-                    headless=self.browser_mode != "headed",
+                    headless=force_headless,
                     device_id=did,
                     log_fn=lambda msg: self._log(msg),
                 )
@@ -376,6 +381,23 @@ class RefreshTokenRegistrationEngine:
             SignupFormResult: 提交结果，包含账号状态判断
         """
         try:
+            # 先访问注册页面获取 Cloudflare Cookie
+            self._log(f"{log_label}: 先访问页面获取 Cloudflare Cookie...")
+            try:
+                page_url = referer
+                nav_headers = self._build_navigation_headers(referer=page_url)
+                page_resp = self.session.get(
+                    page_url,
+                    headers=nav_headers,
+                    allow_redirects=True,
+                    timeout=15,
+                )
+                self._log(f"{log_label}: 页面访问状态: {page_resp.status_code}")
+                # 短暂等待 Cloudflare 验证完成
+                time.sleep(random.uniform(1.0, 2.5))
+            except Exception as page_err:
+                self._log(f"{log_label}: 页面访问异常（继续尝试）: {page_err}")
+
             request_body = json.dumps({
                 "username": {
                     "value": self.email,
@@ -393,6 +415,9 @@ class RefreshTokenRegistrationEngine:
 
             if sen_token:
                 headers["openai-sentinel-token"] = sen_token
+
+            # 提交请求前添加自然延迟
+            time.sleep(random.uniform(0.8, 2.0))
 
             response = self.session.post(
                 OPENAI_API_ENDPOINTS["signup"],
@@ -644,6 +669,22 @@ class RefreshTokenRegistrationEngine:
             self.password = password  # 保存密码到实例变量
             self._log(f"生成密码: {password}")
 
+            # 先访问注册页面获取 Cloudflare Cookie
+            self._log("提交密码前：先访问页面获取 Cloudflare Cookie...")
+            try:
+                page_url = "https://auth.openai.com/create-account/password"
+                nav_headers = self._build_navigation_headers(referer=page_url)
+                page_resp = self.session.get(
+                    page_url,
+                    headers=nav_headers,
+                    allow_redirects=True,
+                    timeout=15,
+                )
+                self._log(f"提交密码前：页面访问状态: {page_resp.status_code}")
+                time.sleep(random.uniform(1.5, 3.0))
+            except Exception as page_err:
+                self._log(f"提交密码前：页面访问异常（继续尝试）: {page_err}")
+
             # 提交密码注册
             register_body = json.dumps({
                 "password": password,
@@ -661,6 +702,9 @@ class RefreshTokenRegistrationEngine:
             )
             if sen_token:
                 headers["openai-sentinel-token"] = sen_token
+
+            # 提交前添加自然延迟
+            time.sleep(random.uniform(1.0, 2.5))
 
             response = self.session.post(
                 OPENAI_API_ENDPOINTS["register"],
