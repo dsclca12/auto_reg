@@ -560,6 +560,16 @@ class RefreshTokenRegistrationEngine:
             result.error_message = "验证码校验失败"
             return False
 
+        # 检查是否进入 add_phone 页面（需要手机号验证）
+        post_page_type = getattr(self, "_post_otp_page_type", "") or ""
+        if post_page_type.lower() == "add_phone":
+            self._log("注册被拦截：OpenAI 要求绑定手机号", "warning")
+            result.error_message = (
+                "注册失败：当前域名或 IP 可能被 OpenAI 风控，触发手机号验证。"
+                "建议：1) 更换代理 IP（使用住宅代理）；2) 更换邮箱域名；3) 降低注册频率"
+            )
+            return False
+
         self._log("获取 Workspace ID...")
         workspace_id = self._get_workspace_id()
         if not workspace_id:
