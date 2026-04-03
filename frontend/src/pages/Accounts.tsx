@@ -833,57 +833,6 @@ export default function Accounts() {
     }
   }
 
-  const handleSub2apiBackfill = async (mode: 'pending' | 'selected') => {
-    if (currentPlatform !== 'chatgpt') return
-
-    const body: Record<string, unknown> = {
-      platforms: ['chatgpt'],
-    }
-
-    if (mode === 'selected') {
-      const accountIds = Array.from(selectedRowKeys)
-        .map((value) => Number(value))
-        .filter((value) => Number.isInteger(value) && value > 0)
-
-      if (accountIds.length === 0) {
-        message.warning('请先选择要上传的账号')
-        return
-      }
-      body.account_ids = accountIds
-    } else {
-      body.pending_only = true
-      if (filterStatus) body.status = filterStatus
-      if (search) body.email = search
-    }
-
-    setCpaSyncLoading(mode)
-    try {
-      const result = await apiFetch('/integrations/backfill-sub2api', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      })
-
-      const actionLabel = mode === 'selected' ? '所选账号 Sub2API 补传' : '远端未发现账号 Sub2API 补传'
-      if (!result.total) {
-        message.info('没有可处理的账号')
-      } else if (!result.failed && !result.skipped) {
-        message.success(`${actionLabel}完成：成功 ${result.success} / ${result.total}`)
-      } else if (!result.failed) {
-        message.success(`${actionLabel}完成：成功 ${result.success}，跳过 ${result.skipped} / ${result.total}`)
-      } else if (!result.success) {
-        message.error(`${actionLabel}失败：成功 ${result.success}，跳过 ${result.skipped} / ${result.total}`)
-      } else {
-        message.warning(`${actionLabel}部分完成：成功 ${result.success}，跳过 ${result.skipped} / ${result.total}`)
-      }
-
-      await load()
-    } catch (e: any) {
-      message.error(`Sub2API 上传失败：${e.message}`)
-    } finally {
-      setCpaSyncLoading('')
-    }
-  }
-
   const handleBatchStatusSync = async (kind: 'probe' | 'remote', scope: 'selected' | 'all') => {
     if (currentPlatform !== 'chatgpt') return
 
@@ -1084,39 +1033,6 @@ export default function Accounts() {
           )
         },
       },
-      {
-        title: 'Sub2API',
-        key: 'sub2api_sync',
-        width: 140,
-        render: (_: any, record: any) => {
-          const sync = record.extra?.sub2api_sync || {}
-          const uploaded = sync.uploaded
-          
-          const lastSync = sync.last_synced_at || ''
-          
-          let color = 'default'
-          let label = '未上传'
-          
-          if (uploaded === true) {
-            color = 'success'
-            label = '已上传'
-          } else if (uploaded === false) {
-            color = 'error'
-            label = '上传失败'
-          }
-          
-          return (
-            <div style={{ ...cellStackStyle, ...compactPanelStyle }}>
-              <Tag color={color}>{label}</Tag>
-              {lastSync && (
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  {new Date(lastSync).toLocaleDateString()}
-                </Text>
-              )}
-            </div>
-          )
-        },
-      },
     )
   } else {
     columns.push(
@@ -1251,41 +1167,22 @@ export default function Accounts() {
             </Dropdown>
           )}
           {currentPlatform === 'chatgpt' && (
-            <>
-              <Popconfirm
-                title={
-                  getBackfillScope() === 'selected'
-                    ? `确认补传所选 ${selectedRowKeys.length} 个账号中远端未发现的 auth-file？`
-                    : '确认补传当前筛选范围内远端未发现且本地状态有效的账号？'
-                }
-                onConfirm={() => handleCpaBackfill(getBackfillScope())}
+            <Popconfirm
+              title={
+                getBackfillScope() === 'selected'
+                  ? `确认补传所选 ${selectedRowKeys.length} 个账号中远端未发现的 auth-file？`
+                  : '确认补传当前筛选范围内远端未发现且本地状态有效的账号？'
+              }
+              onConfirm={() => handleCpaBackfill(getBackfillScope())}
+            >
+              <Button
+                loading={cpaSyncLoading === 'pending' || cpaSyncLoading === 'selected'}
+                icon={<UploadOutlined />}
+                disabled={getBackfillScope() === 'selected' ? selectedRowKeys.length === 0 : total === 0}
               >
-                <Button
-                  loading={cpaSyncLoading === 'pending' || cpaSyncLoading === 'selected'}
-                  icon={<UploadOutlined />}
-                  disabled={getBackfillScope() === 'selected' ? selectedRowKeys.length === 0 : total === 0}
-                >
-                  {backfillButtonLabel()}
-                </Button>
-              </Popconfirm>
-              <Popconfirm
-                title={
-                  getBackfillScope() === 'selected'
-                    ? `确认补传所选 ${selectedRowKeys.length} 个账号到 Sub2API？`
-                    : '确认补传当前筛选范围内账号到 Sub2API？'
-                }
-                onConfirm={() => handleSub2apiBackfill(getBackfillScope() === 'selected' ? 'selected' : 'pending')}
-              >
-                <Button
-                  type="primary"
-                  loading={cpaSyncLoading === 'pending' || cpaSyncLoading === 'selected'}
-                  icon={<UploadOutlined />}
-                  disabled={getBackfillScope() === 'selected' ? selectedRowKeys.length === 0 : total === 0}
-                >
-                  上传到 Sub2API
-                </Button>
-              </Popconfirm>
-            </>
+                {backfillButtonLabel()}
+              </Button>
+            </Popconfirm>
           )}
           {selectedRowKeys.length > 0 && (
             <Popconfirm title={`确认删除选中的 ${selectedRowKeys.length} 个账号？`} onConfirm={handleBatchDelete}>

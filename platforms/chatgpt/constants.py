@@ -66,6 +66,7 @@ OPENAI_API_ENDPOINTS = {
     "validate_otp": "https://auth.openai.com/api/accounts/email-otp/validate",
     "create_account": "https://auth.openai.com/api/accounts/create_account",
     "select_workspace": "https://auth.openai.com/api/accounts/workspace/select",
+    "select_organization": "https://auth.openai.com/api/accounts/organization/select",
 }
 
 # OpenAI 页面类型（用于判断账号状态）
@@ -150,10 +151,12 @@ OPENAI_VERIFICATION_KEYWORDS = [
 ]
 
 # 密码生成
-PASSWORD_CHARSET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-DEFAULT_PASSWORD_LENGTH = 12
+PASSWORD_CHARSET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%"
+DEFAULT_PASSWORD_LENGTH = 16
 
 # 用户信息生成（用于注册）
+MIN_REGISTRATION_AGE = 20
+MAX_REGISTRATION_AGE = 45
 
 # 常用英文名
 FIRST_NAMES = [
@@ -174,9 +177,9 @@ def generate_random_user_info() -> dict:
     # 随机选择名字
     name = random.choice(FIRST_NAMES)
 
-    # 生成随机生日（18-45岁）
+    # 生成随机生日（20-45岁）
     current_year = datetime.now().year
-    birth_year = random.randint(current_year - 45, current_year - 25)
+    birth_year = random.randint(current_year - MAX_REGISTRATION_AGE, current_year - MIN_REGISTRATION_AGE)
     birth_month = random.randint(1, 12)
     # 根据月份确定天数
     if birth_month in [1, 3, 5, 7, 8, 10, 12]:
@@ -241,7 +244,7 @@ DEFAULT_SETTINGS = [
     ("proxy.port", "7890", "代理端口", "proxy"),
     ("registration.max_retries", "3", "最大重试次数", "registration"),
     ("registration.timeout", "120", "超时时间（秒）", "registration"),
-    ("registration.default_password_length", "12", "默认密码长度", "registration"),
+    ("registration.default_password_length", "16", "默认密码长度", "registration"),
     ("webui.host", "0.0.0.0", "Web UI 监听主机", "webui"),
     ("webui.port", "8000", "Web UI 监听端口", "webui"),
     ("webui.debug", "true", "调试模式", "webui"),

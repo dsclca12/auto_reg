@@ -29,6 +29,25 @@ class RegisterTaskControlTests(unittest.TestCase):
         with self.assertRaises(StopTaskRequested):
             control.checkpoint()
 
+    def test_skip_current_targets_only_active_attempts_in_multithread_mode(self):
+        control = RegisterTaskControl()
+        attempt_a = control.start_attempt()
+        attempt_b = control.start_attempt()
+
+        control.request_skip_current()
+
+        with self.assertRaises(SkipCurrentAttemptRequested):
+            control.checkpoint(attempt_id=attempt_a)
+        with self.assertRaises(SkipCurrentAttemptRequested):
+            control.checkpoint(attempt_id=attempt_b)
+
+        control.finish_attempt(attempt_a)
+        control.finish_attempt(attempt_b)
+
+        attempt_c = control.start_attempt()
+        control.checkpoint(attempt_id=attempt_c)
+        control.finish_attempt(attempt_c)
+
 
 class RegisterTaskStoreTests(unittest.TestCase):
     def test_snapshot_contains_control_and_skip_fields(self):

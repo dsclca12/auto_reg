@@ -13,6 +13,8 @@ import re
 from urllib.parse import urlparse
 from typing import Any, Dict
 
+from .constants import MAX_REGISTRATION_AGE, MIN_REGISTRATION_AGE
+
 
 @dataclass
 class FlowState:
@@ -61,8 +63,14 @@ def generate_random_name():
 
 
 def generate_random_birthday():
-    """生成随机生日字符串，格式 YYYY-MM-DD（20~30岁）"""
-    year = random.randint(1996, 2006)
+    """生成随机生日字符串，格式 YYYY-MM-DD（20~45岁）"""
+    from datetime import datetime
+
+    current_year = datetime.now().year
+    year = random.randint(
+        current_year - MAX_REGISTRATION_AGE,
+        current_year - MIN_REGISTRATION_AGE,
+    )
     month = random.randint(1, 12)
     day = random.randint(1, 28)
     return f"{year:04d}-{month:02d}-{day:02d}"

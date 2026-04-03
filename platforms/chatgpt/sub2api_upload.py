@@ -29,6 +29,30 @@ def _get_config_value(key: str) -> str:
         return ""
 
 
+def _parse_group_ids(raw: Any, fallback: list[int] | None = None) -> list[int]:
+    candidates: list[Any]
+    if isinstance(raw, str):
+        candidates = [part.strip() for part in raw.split(",")]
+    elif isinstance(raw, (list, tuple, set)):
+        candidates = list(raw)
+    elif raw is None:
+        candidates = []
+    else:
+        candidates = [raw]
+
+    values: list[int] = []
+    for item in candidates:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        try:
+            values.append(int(text))
+        except ValueError:
+            continue
+
+    return values or list(fallback or DEFAULT_GROUP_IDS)
+
+
 def _decode_jwt_payload(token: str) -> dict[str, Any]:
     try:
         parts = str(token or "").split(".")
@@ -101,7 +125,7 @@ def _build_sub2api_account_payload(account, group_ids: list[int] | None = None) 
             "id_token": id_token,
         },
         "extra": {"email": email},
-        "group_ids": group_ids or DEFAULT_GROUP_IDS,
+        "group_ids": _parse_group_ids(group_ids),
         "concurrency": 10,
         "priority": 1,
         "auto_pause_on_expired": True,
@@ -117,13 +141,16 @@ def upload_to_sub2api(
     """上传单个账号到 Sub2API 管理后台。"""
     api_url = str(api_url or _get_config_value("sub2api_api_url")).strip()
     api_key = str(api_key or _get_config_value("sub2api_api_key")).strip()
+    resolved_group_ids = _parse_group_ids(
+        _get_config_value("sub2api_group_ids") if group_ids is None else group_ids
+    )
 
     if not api_url:
         return False, "Sub2API API URL 未配置"
     if not api_key:
         return False, "Sub2API API Key 未配置"
 
-    payload = _build_sub2api_account_payload(account, group_ids=group_ids)
+    payload = _build_sub2api_account_payload(account, group_ids=resolved_group_ids)
     url = f"{api_url.rstrip('/')}/api/v1/admin/accounts"
     headers = {
         "Content-Type": "application/json",

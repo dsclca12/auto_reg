@@ -18,6 +18,7 @@ except ImportError:
     sys.exit(1)
 
 from .sentinel_token import build_sentinel_token
+from .sentinel_browser import get_sentinel_token_via_browser
 from .utils import (
     FlowState,
     build_browser_headers,
@@ -129,6 +130,33 @@ class ChatGPTClient:
         # 设置 oai-did cookie
         seed_oai_device_cookie(self.session, self.device_id)
         self.last_registration_state = FlowState()
+
+    def _get_sentinel_token(self, flow: str, *, page_url: str | None = None):
+        prefer_browser = flow in {"username_password_create", "oauth_create_account"}
+        if prefer_browser:
+            token = get_sentinel_token_via_browser(
+                flow=flow,
+                proxy=self.proxy,
+                page_url=page_url,
+                headless=self.browser_mode != "headed",
+                device_id=self.device_id,
+                log_fn=lambda msg: self._log(msg),
+            )
+            if token:
+                self._log(f"{flow}: 已通过 Playwright SentinelSDK 获取 token")
+                return token
+
+        token = build_sentinel_token(
+            self.session,
+            self.device_id,
+            flow=flow,
+            user_agent=self.ua,
+            sec_ch_ua=self.sec_ch_ua,
+            impersonate=self.impersonate,
+        )
+        if token:
+            self._log(f"{flow}: 已通过 HTTP PoW 获取 token")
+        return token
 
     def _log(self, msg):
         """输出日志"""
@@ -606,6 +634,14 @@ class ChatGPTClient:
             fetch_site="same-origin",
         )
         headers.update(generate_datadog_trace())
+        headers["oai-device-id"] = self.device_id
+
+        sentinel_token = self._get_sentinel_token(
+            "username_password_create",
+            page_url=f"{self.AUTH}/create-account/password",
+        )
+        if sentinel_token:
+            headers["openai-sentinel-token"] = sentinel_token
 
         payload = {
             "username": email,
@@ -720,13 +756,9 @@ class ChatGPTClient:
         self._log(f"完成账号创建: {name}")
         url = f"{self.AUTH}/api/accounts/create_account"
 
-        sentinel_token = build_sentinel_token(
-            self.session,
-            self.device_id,
-            flow="authorize_continue",
-            user_agent=self.ua,
-            sec_ch_ua=self.sec_ch_ua,
-            impersonate=self.impersonate,
+        sentinel_token = self._get_sentinel_token(
+            "oauth_create_account",
+            page_url=f"{self.AUTH}/about-you",
         )
         if sentinel_token:
             self._log("create_account: 已生成 sentinel token")
