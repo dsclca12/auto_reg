@@ -608,6 +608,16 @@ GROK2API_PORT_BIND=8011
 
 ---
 
+## ☕ 支持与捐赠
+
+如果本项目对你有帮助，可以考虑请我喝杯咖啡，支持项目的持续开发和维护！💖
+
+| 微信支付 | 支付宝 |
+|---------|--------|
+| <img src="mm_facetoface_collect_qrcode_1775206373527.png" width="200" alt="微信支付" /> | <img src="mm_facetoface_collect_qrcode_1775206373527.png" width="200" alt="支付宝" /> |
+
+---
+
 ## 📊 Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=dsclca12/auto_reg&type=Date)](https://star-history.com/#dsclca12/auto_reg&Date)

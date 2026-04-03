@@ -606,6 +606,16 @@ This project is for **learning and research purposes only**. It shall not be use
 
 ---
 
+## ☕ Support & Donations
+
+If this project helps you, consider buying me a coffee to support development and maintenance. Every donation is appreciated! 💖
+
+| WeChat Pay | Alipay |
+|------------|--------|
+| <img src="mm_facetoface_collect_qrcode_1775206373527.png" width="200" alt="WeChat Pay" /> | <img src="mm_facetoface_collect_qrcode_1775206373527.png" width="200" alt="Alipay" /> |
+
+---
+
 ## 📊 Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=dsclca12/auto_reg&type=Date)](https://star-history.com/#dsclca12/auto_reg&Date)
