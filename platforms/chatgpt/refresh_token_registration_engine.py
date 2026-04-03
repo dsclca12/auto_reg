@@ -588,12 +588,106 @@ class RefreshTokenRegistrationEngine:
         # 检查是否进入 add_phone 页面（需要手机号验证）
         post_page_type = getattr(self, "_post_otp_page_type", "") or ""
         if post_page_type.lower() == "add_phone":
-            self._log("注册被拦截：OpenAI 要求绑定手机号", "warning")
-            result.error_message = (
-                "注册失败：当前域名或 IP 可能被 OpenAI 风控，触发手机号验证。"
-                "建议：1) 更换代理 IP（使用住宅代理）；2) 更换邮箱域名；3) 降低注册频率"
-            )
-            return False
+            self._log("OpenAI 要求绑定手机号，模拟用户正常退出流程...", "warning")
+            
+            # 模拟人类行为：访问 add-phone 页面，浏览后返回
+            try:
+                add_phone_url = "https://auth.openai.com/add-phone"
+                nav_headers = self._build_navigation_headers(referer=add_phone_url)
+                page_resp = self.session.get(
+                    add_phone_url,
+                    headers=nav_headers,
+                    allow_redirects=True,
+                    timeout=15,
+                )
+                self._log(f"访问 add-phone 页面状态: {page_resp.status_code}")
+                # 浏览页面 2-5 秒
+                time.sleep(random.uniform(2.0, 5.0))
+            except Exception:
+                pass
+            
+            # 模拟用户点击"跳过"或返回上一页
+            self._log("模拟用户放弃绑定手机号，返回上一页...")
+            time.sleep(random.uniform(1.0, 2.0))
+            
+            # 尝试继续后续流程（有些情况下 add-phone 是可选的）
+            self._log("尝试继续注册流程...")
+            try:
+                continue_url = getattr(self, "_post_otp_continue_url", "") or ""
+                if continue_url:
+                    self._log(f"尝试访问 continue_url: {continue_url[:80]}...")
+                    nav_headers = self._build_navigation_headers(referer=continue_url)
+                    resp = self.session.get(
+                        continue_url,
+                        headers=nav_headers,
+                        allow_redirects=True,
+                        timeout=20,
+                    )
+                    self._log(f"continue_url 响应状态: {resp.status_code}")
+                    if resp.status_code == 200:
+                        try:
+                            data = resp.json()
+                            new_page_type = str((data.get("page") or {}).get("type") or "")
+                            self._log(f"continue_url 页面类型: {new_page_type}")
+                            if new_page_type and new_page_type.lower() != "add_phone":
+                                self._log("成功绕过 add-phone 页面！")
+                                # 更新页面类型，继续后续流程
+                                self._post_otp_page_type = new_page_type
+                                if data.get("continue_url"):
+                                    self._post_otp_continue_url = str(data["continue_url"])
+                        except Exception:
+                            pass
+            except Exception as e:
+                self._log(f"尝试继续流程时异常: {e}")
+            
+            # 如果还是 add_phone，则重试一次（最多重试 1 次）
+            post_page_type = getattr(self, "_post_otp_page_type", "") or ""
+            if post_page_type.lower() == "add_phone":
+                self._log("重试：重新获取验证码并注册...", "warning")
+                # 重新发送 OTP
+                try:
+                    self._log("重新发送验证码...")
+                    send_otp_url = "https://auth.openai.com/api/accounts/email-otp/send"
+                    send_headers = self._build_json_headers(
+                        referer="https://auth.openai.com/email-verification",
+                    )
+                    send_resp = self.session.get(
+                        send_otp_url,
+                        headers=send_headers,
+                        allow_redirects=True,
+                        timeout=15,
+                    )
+                    self._log(f"重新发送验证码状态: {send_resp.status_code}")
+                    time.sleep(random.uniform(2.0, 4.0))
+                except Exception as e:
+                    self._log(f"重新发送验证码异常: {e}")
+                
+                # 重新获取验证码
+                self._log("等待新验证码...")
+                new_code = self._get_verification_code()
+                if new_code:
+                    self._log(f"获取到新验证码: {new_code}，重新校验...")
+                    # 重新校验
+                    if not self._validate_verification_code(new_code):
+                        result.error_message = "重新校验验证码失败"
+                        return False
+                    
+                    # 再次检查页面类型
+                    post_page_type = getattr(self, "_post_otp_page_type", "") or ""
+                    if post_page_type.lower() == "add_phone":
+                        self._log("重试后仍然进入 add-phone 页面，放弃注册", "error")
+                        result.error_message = (
+                            "注册失败：OpenAI 要求绑定手机号。"
+                            "建议：1) 更换住宅代理 IP；2) 更换邮箱域名；"
+                            "3) 降低注册频率；4) 尝试不同时间段注册"
+                        )
+                        return False
+                    else:
+                        self._log("重试成功，继续注册流程")
+                else:
+                    self._log("未获取到新验证码，放弃注册", "error")
+                    result.error_message = "重试时未获取到新验证码"
+                    return False
 
         self._log("获取 Workspace ID...")
         workspace_id = self._get_workspace_id()
@@ -821,8 +915,35 @@ class RefreshTokenRegistrationEngine:
             return None
 
     def _validate_verification_code(self, code: str) -> bool:
-        """验证验证码"""
+        """验证验证码（增强人类行为模拟）"""
         try:
+            # 人类行为模拟：验证前先访问邮箱验证页面并停留
+            self._log("验证前：模拟用户查看邮箱验证码页面...")
+            try:
+                email_verification_url = "https://auth.openai.com/email-verification"
+                nav_headers = self._build_navigation_headers(referer=email_verification_url)
+                page_resp = self.session.get(
+                    email_verification_url,
+                    headers=nav_headers,
+                    allow_redirects=True,
+                    timeout=15,
+                )
+                self._log(f"验证前：邮箱验证页面状态: {page_resp.status_code}")
+                # 模拟用户阅读验证码的时间（3-8秒）
+                time.sleep(random.uniform(3.0, 8.0))
+            except Exception as page_err:
+                self._log(f"验证前：页面访问异常（继续）: {page_err}")
+
+            # 模拟用户输入验证码的节奏（逐位输入，每位间隔0.5-1.5秒）
+            self._log(f"模拟输入验证码: {code}...")
+            for i, digit in enumerate(str(code)):
+                time.sleep(random.uniform(0.5, 1.5))
+                if i < len(str(code)) - 1:
+                    self._log(f"  输入第 {i+1} 位: {digit}")
+
+            # 输入完成后停顿1-3秒再提交
+            time.sleep(random.uniform(1.0, 3.0))
+
             code_body = f'{{"code":"{code}"}}'
             headers = self._build_json_headers(
                 referer="https://auth.openai.com/email-verification",
