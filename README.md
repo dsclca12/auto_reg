@@ -45,6 +45,11 @@ This project is a third-generation fork based on the following outstanding open-
 - [Email Services](#-email-services)
 - [Captcha Services](#-captcha-services)
 - [Usage Guide](#-usage-guide)
+  - [Register Accounts](#register-accounts)
+  - [Scheduled Tasks](#scheduled-tasks)
+  - [Batch Upload](#batch-upload)
+  - [Delete Accounts](#delete-accounts)
+  - [One-Click Update](#one-click-update)
 - [Project Structure](#-project-structure)
 - [API Documentation](#-api-documentation)
 - [Troubleshooting](#-troubleshooting)
@@ -300,6 +305,31 @@ Available at the top of ChatGPT platform list:
 - **Re-upload Undiscovered**
   - Re-upload auth-file not found remotely
   - Supports "current filter scope" or "currently selected accounts"
+
+### Delete Accounts
+
+1. Navigate to **Account Management** page
+2. Select accounts to delete (single or multiple selection)
+3. Click **Delete** button to confirm deletion
+4. Supports batch deletion of multiple selected accounts
+
+### One-Click Update
+
+The project provides a quick update script to pull code, update dependencies, and restart the service in one go:
+
+```bash
+# Run in the project root directory
+./update.sh
+```
+
+The script will automatically:
+1. Stop the currently running service
+2. Pull the latest code
+3. Update Python dependencies
+4. Update frontend dependencies and rebuild
+5. Prompt whether to start the service
+
+> **Note**: The script uses Conda environment by default. If using venv, activate your environment first and manually perform the update steps.
 
 ---
 
