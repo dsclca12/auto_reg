@@ -44,6 +44,7 @@ export default function RegisterTaskPage() {
         mail_provider: cfg.mail_provider || 'luckmail',
         yescaptcha_key: cfg.yescaptcha_key || '',
         moemail_api_url: cfg.moemail_api_url || '',
+        moemail_api_key: cfg.moemail_api_key || '',
         skymail_api_base: cfg.skymail_api_base || 'https://api.skymail.ink',
         skymail_token: cfg.skymail_token || '',
         skymail_domain: cfg.skymail_domain || '',
@@ -53,6 +54,9 @@ export default function RegisterTaskPage() {
         gptmail_base_url: cfg.gptmail_base_url || 'https://mail.chatgpt.org.uk',
         gptmail_api_key: cfg.gptmail_api_key || '',
         gptmail_domain: cfg.gptmail_domain || '',
+        opentrashmail_api_url: cfg.opentrashmail_api_url || '',
+        opentrashmail_domain: cfg.opentrashmail_domain || '',
+        opentrashmail_password: cfg.opentrashmail_password || '',
         maliapi_base_url: cfg.maliapi_base_url || 'https://maliapi.215.im/v1',
         maliapi_api_key: cfg.maliapi_api_key || '',
         maliapi_domain: cfg.maliapi_domain || '',
@@ -95,11 +99,15 @@ export default function RegisterTaskPage() {
       gptmail_base_url: values.gptmail_base_url,
       gptmail_api_key: values.gptmail_api_key,
       gptmail_domain: values.gptmail_domain,
+      opentrashmail_api_url: values.opentrashmail_api_url,
+      opentrashmail_domain: values.opentrashmail_domain,
+      opentrashmail_password: values.opentrashmail_password,
       maliapi_base_url: values.maliapi_base_url,
       maliapi_api_key: values.maliapi_api_key,
       maliapi_domain: values.maliapi_domain,
       maliapi_auto_domain_strategy: values.maliapi_auto_domain_strategy,
       moemail_api_url: values.moemail_api_url,
+      moemail_api_key: values.moemail_api_key,
       skymail_api_base: values.skymail_api_base,
       skymail_token: values.skymail_token,
       skymail_domain: values.skymail_domain,
@@ -268,6 +276,7 @@ export default function RegisterTaskPage() {
                 { value: 'skymail', label: 'SkyMail (CloudMail)' },
                 { value: 'maliapi', label: 'YYDS Mail / MaliAPI' },
                 { value: 'gptmail', label: 'GPTMail' },
+                { value: 'opentrashmail', label: 'OpenTrashMail' },
                 { value: 'duckmail', label: 'DuckMail' },
                 { value: 'freemail', label: 'Freemail' },
                 { value: 'laoudo', label: 'Laoudo' },
@@ -337,6 +346,27 @@ export default function RegisterTaskPage() {
                 extra="已知当前可用域名时可直接本地拼装随机地址，省掉一次 generate-email 请求"
               >
                 <Input placeholder="example.com" />
+              </Form.Item>
+            </>
+          )}
+          {mailProvider === 'opentrashmail' && (
+            <>
+              <Form.Item name="opentrashmail_api_url" label="API URL" rules={[{ required: true, message: '请输入 OpenTrashMail 地址' }]}>
+                <Input placeholder="http://mail.example.com:8085" />
+              </Form.Item>
+              <Form.Item
+                name="opentrashmail_domain"
+                label="邮箱域名（可选）"
+                extra="已知 OpenTrashMail 当前启用域名时可直接本地拼装随机地址；留空则调用 /api/random 自动获取"
+              >
+                <Input placeholder="xiyoufm.com" />
+              </Form.Item>
+              <Form.Item
+                name="opentrashmail_password"
+                label="站点密码（可选）"
+                extra="当 OpenTrashMail 开启 PASSWORD 保护时填写，会自动追加到 JSON API 查询参数"
+              >
+                <Input.Password placeholder="留空表示未启用" />
               </Form.Item>
             </>
           )}

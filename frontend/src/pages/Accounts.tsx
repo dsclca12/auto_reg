@@ -641,6 +641,7 @@ export default function Accounts() {
         maliapi_auto_domain_strategy: cfg.maliapi_auto_domain_strategy,
         yescaptcha_key: cfg.yescaptcha_key,
         moemail_api_url: cfg.moemail_api_url,
+        moemail_api_key: cfg.moemail_api_key,
         skymail_api_base: cfg.skymail_api_base,
         skymail_token: cfg.skymail_token,
         skymail_domain: cfg.skymail_domain,

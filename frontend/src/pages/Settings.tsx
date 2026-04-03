@@ -26,6 +26,7 @@ const SELECT_FIELDS: Record<string, { label: string; value: string }[]> = {
     { label: 'MoeMail (sall.cc)', value: 'moemail' },
     { label: 'YYDS Mail / MaliAPI', value: 'maliapi' },
     { label: 'GPTMail', value: 'gptmail' },
+    { label: 'OpenTrashMail', value: 'opentrashmail' },
     { label: 'Freemail（自建 CF Worker）', value: 'freemail' },
     { label: 'CF Worker（自建域名）', value: 'cfworker' },
   ],
@@ -99,7 +100,10 @@ const TAB_ITEMS = [
       {
         title: 'MoeMail',
         desc: '自动注册账号并生成临时邮箱',
-        fields: [{ key: 'moemail_api_url', label: 'API URL', placeholder: 'https://sall.cc' }],
+        fields: [
+          { key: 'moemail_api_url', label: 'API URL', placeholder: 'https://sall.cc' },
+          { key: 'moemail_api_key', label: 'API Key', secret: true },
+        ],
       },
       {
         title: 'SkyMail',
@@ -127,6 +131,15 @@ const TAB_ITEMS = [
           { key: 'gptmail_base_url', label: 'API URL', placeholder: 'https://mail.chatgpt.org.uk' },
           { key: 'gptmail_api_key', label: 'API Key', secret: true, placeholder: 'gpt-test' },
           { key: 'gptmail_domain', label: '邮箱域名（可选）', placeholder: 'example.com' },
+        ],
+      },
+      {
+        title: 'OpenTrashMail',
+        desc: '对接 opentrashmail 服务；可直接轮询 /json/<email>，也支持已知域名时本地拼装随机地址',
+        fields: [
+          { key: 'opentrashmail_api_url', label: 'API URL', placeholder: 'http://mail.example.com:8085' },
+          { key: 'opentrashmail_domain', label: '邮箱域名（可选）', placeholder: 'xiyoufm.com' },
+          { key: 'opentrashmail_password', label: '站点密码（可选）', secret: true, placeholder: '启用 PASSWORD 时填写' },
         ],
       },
       {

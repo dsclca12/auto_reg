@@ -114,13 +114,13 @@ class TurnstileAPIServer:
         self.console.clear()
         
         combined_text = Text()
-        combined_text.append("\n📢 Channel: ", style="bold white")
+        combined_text.append("\n[Channel] ", style="bold white")
         combined_text.append("https://t.me/D3_vin", style="cyan")
-        combined_text.append("\n💬 Chat: ", style="bold white")
+        combined_text.append("\n[Chat] ", style="bold white")
         combined_text.append("https://t.me/D3vin_chat", style="cyan")
-        combined_text.append("\n📁 GitHub: ", style="bold white")
+        combined_text.append("\n[GitHub] ", style="bold white")
         combined_text.append("https://github.com/D3-vin", style="cyan")
-        combined_text.append("\n📁 Version: ", style="bold white")
+        combined_text.append("\n[Version] ", style="bold white")
         combined_text.append("1.2a", style="green")
         combined_text.append("\n")
 

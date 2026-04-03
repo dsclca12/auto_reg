@@ -88,7 +88,7 @@ def _auto_upload_integrations(task_id: str, account):
             name = result.get("name", "Auto Upload")
             ok = bool(result.get("ok"))
             msg = result.get("msg", "")
-            _log(task_id, f"  [{name}] {'✓ ' + msg if ok else '✗ ' + msg}")
+            _log(task_id, f"  [{name}] {'[OK] ' + msg if ok else '[FAIL] ' + msg}")
     except Exception as e:
         _log(task_id, f"  [Auto Upload] 自动导入异常: {e}")
 
@@ -188,7 +188,7 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                             account.extra.setdefault("luckmail_base_url", merged_extra.get("luckmail_base_url"))
                 saved_account = save_account(account)
                 if _proxy: proxy_pool.report_success(_proxy)
-                _log(task_id, f"✓ 注册成功: {account.email}")
+                _log(task_id, f"[OK] 注册成功: {account.email}")
                 _save_task_log(req.platform, account.email, "success")
                 _auto_upload_integrations(task_id, saved_account or account)
                 cashier_url = (account.extra or {}).get("cashier_url", "")
@@ -199,7 +199,7 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                 return True
             except Exception as e:
                 if _proxy: proxy_pool.report_fail(_proxy)
-                _log(task_id, f"✗ 注册失败: {e}")
+                _log(task_id, f"[FAIL] 注册失败: {e}")
                 _save_task_log(req.platform, req.email or "", "failed", error=str(e))
                 return str(e)
 
@@ -211,7 +211,7 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                 try:
                     result = f.result()
                 except Exception as e:
-                    _log(task_id, f"✗ 任务线程异常: {e}")
+                    _log(task_id, f"[ERROR] 任务线程异常: {e}")
                     errors.append(str(e))
                     continue
                 if result is True:
