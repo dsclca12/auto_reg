@@ -1,6 +1,5 @@
 """数据库模型 - SQLite via SQLModel"""
 from datetime import datetime, timezone
-import os
 from typing import Optional
 from sqlmodel import Field, SQLModel, create_engine, Session, select
 import json
@@ -9,7 +8,7 @@ import json
 def _utcnow():
     return datetime.now(timezone.utc)
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///account_manager.db")
+DATABASE_URL = "sqlite:///account_manager.db"
 engine = create_engine(DATABASE_URL)
 
 
@@ -106,3 +105,26 @@ def init_db():
 def get_session():
     with Session(engine) as session:
         yield session
+
+
+# 定时任务模型
+class ScheduledTaskModel(SQLModel, table=True):
+    __tablename__ = "scheduled_tasks"
+
+    task_id: str = Field(primary_key=True)
+    platform: str
+    count: int = 1
+    executor_type: str = "protocol"
+    captcha_solver: str = "yescaptcha"
+    extra_json: str = "{}"
+    interval_type: str = "minutes"  # minutes | hours
+    interval_value: int = 30
+    paused: bool = False
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+    def get_extra(self) -> dict:
+        return json.loads(self.extra_json or "{}")
+
+    def set_extra(self, d: dict):
+        self.extra_json = json.dumps(d, ensure_ascii=False)
