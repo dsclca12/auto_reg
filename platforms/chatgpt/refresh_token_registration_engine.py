@@ -381,20 +381,40 @@ class RefreshTokenRegistrationEngine:
             SignupFormResult: 提交结果，包含账号状态判断
         """
         try:
-            # 先访问注册页面获取 Cloudflare Cookie
+            # 先访问注册页面获取 Cloudflare Cookie (cf_clearance)
             self._log(f"{log_label}: 先访问页面获取 Cloudflare Cookie...")
             try:
                 page_url = referer
                 nav_headers = self._build_navigation_headers(referer=page_url)
+                
+                # 第一次访问：获取 cf_clearance cookie
                 page_resp = self.session.get(
+                    page_url,
+                    headers=nav_headers,
+                    allow_redirects=True,
+                    timeout=20,
+                )
+                self._log(f"{log_label}: 页面访问状态: {page_resp.status_code}")
+                
+                # 检查是否获得了 cf_clearance
+                cf_cookie = self.session.cookies.get("cf_clearance")
+                if cf_cookie:
+                    self._log(f"{log_label}: 成功获取 cf_clearance cookie")
+                else:
+                    self._log(f"{log_label}: 未获取到 cf_clearance，可能需要等待")
+                
+                # 等待 Cloudflare JS challenge 完成
+                time.sleep(random.uniform(2.0, 4.0))
+                
+                # 第二次访问：确保 challenge 完全完成
+                page_resp2 = self.session.get(
                     page_url,
                     headers=nav_headers,
                     allow_redirects=True,
                     timeout=15,
                 )
-                self._log(f"{log_label}: 页面访问状态: {page_resp.status_code}")
-                # 短暂等待 Cloudflare 验证完成
-                time.sleep(random.uniform(1.0, 2.5))
+                self._log(f"{log_label}: 二次访问状态: {page_resp2.status_code}")
+                
             except Exception as page_err:
                 self._log(f"{log_label}: 页面访问异常（继续尝试）: {page_err}")
 
@@ -586,62 +606,69 @@ class RefreshTokenRegistrationEngine:
             return False
 
         # 检查是否进入 add_phone 页面（需要手机号验证）
+        # 尝试多种方法绕过 add_phone 页面
         post_page_type = getattr(self, "_post_otp_page_type", "") or ""
         if post_page_type.lower() == "add_phone":
-            self._log("OpenAI 要求绑定手机号，尝试重新验证以绕过...", "warning")
-
-            # 更新时间戳，让邮箱服务从当前时间之后查找新验证码
-            self._otp_sent_at = time.time()
+            self._log("OpenAI 要求绑定手机号，尝试多种方法绕过...", "warning")
             
-            # 直接重新发送验证码并验证，看是否能绕过 add-phone 页面
-            self._log("重新发送验证码...")
+            # 方法 1：直接访问 consent 页面，看是否已建立足够会话
+            self._log("尝试 1：直接访问 consent 页面...")
             try:
-                send_otp_url = "https://auth.openai.com/api/accounts/email-otp/send"
-                send_headers = self._build_json_headers(
-                    referer="https://auth.openai.com/email-verification",
-                )
-                send_resp = self.session.get(
-                    send_otp_url,
-                    headers=send_headers,
+                consent_url = "https://auth.openai.com/sign-in-with-chatgpt/codex/consent"
+                consent_resp = self.session.get(
+                    consent_url,
+                    headers=self._build_navigation_headers(referer=consent_url),
                     allow_redirects=True,
                     timeout=15,
                 )
-                self._log(f"重新发送验证码状态: {send_resp.status_code}")
-                
-                # 等待邮件到达
-                wait_time = random.uniform(3.0, 6.0)
-                self._log(f"等待新邮件到达: {wait_time:.1f}秒...")
-                time.sleep(wait_time)
+                self._log(f"consent 页面状态: {consent_resp.status_code}")
+                # 如果没有被重定向回 add-phone，说明成功绕过
+                if "add-phone" not in str(consent_resp.url):
+                    self._log("成功通过 consent 页面，跳过 add-phone")
+                    self._post_otp_page_type = "consent"
+                    self._post_otp_continue_url = str(consent_resp.url)
+                else:
+                    self._log("consent 页面也被重定向到 add-phone，方法 1 失败")
             except Exception as e:
-                self._log(f"重新发送验证码异常: {e}")
-
-            # 重新获取验证码
-            self._log("等待新验证码...")
-            new_code = self._get_verification_code()
-            if new_code:
-                self._log(f"获取到新验证码: {new_code}，重新校验...")
-                # 重新校验
-                if not self._validate_verification_code(new_code):
-                    result.error_message = "重新校验验证码失败"
-                    return False
-
-                # 再次检查页面类型
-                post_page_type = getattr(self, "_post_otp_page_type", "") or ""
-                if post_page_type.lower() == "add_phone":
-                    self._log("重试后仍然进入 add-phone 页面，放弃注册", "error")
+                self._log(f"访问 consent 页面异常: {e}", "warning")
+            
+            # 方法 2：如果方法 1 失败，尝试访问 about-you 页面
+            if getattr(self, "_post_otp_page_type", "") == "add_phone":
+                self._log("尝试 2：访问 about-you 页面建立 Cookie...")
+                try:
+                    about_resp = self.session.get(
+                        "https://auth.openai.com/about-you",
+                        headers=self._build_navigation_headers(
+                            referer="https://auth.openai.com/email-verification"
+                        ),
+                        allow_redirects=True,
+                        timeout=15,
+                    )
+                    self._log(f"about-you 状态: {about_resp.status_code}, 最终 URL: {about_resp.url}")
+                    if "add-phone" not in str(about_resp.url):
+                        self._log("about-you 没有重定向到 add-phone，可能成功绕过")
+                        self._post_otp_continue_url = str(about_resp.url)
+                        if "consent" in str(about_resp.url):
+                            self._post_otp_page_type = "consent"
+                except Exception as e:
+                    self._log(f"访问 about-you 异常: {e}", "warning")
+            
+            # 方法 3：检查 workspace cookie 是否已存在
+            if getattr(self, "_post_otp_page_type", "") == "add_phone":
+                self._log("尝试 3：检查 workspace cookie 是否已存在...")
+                workspace_id = self._get_workspace_id()
+                if workspace_id:
+                    self._log(f"发现已有 workspace ID: {workspace_id}，直接选择 workspace")
+                    self._post_otp_page_type = "workspace_ready"
+                else:
+                    self._log("没有找到 workspace cookie，放弃注册", "error")
                     result.error_message = (
                         "注册失败：OpenAI 要求绑定手机号。"
                         "建议：1) 更换住宅代理 IP；2) 更换邮箱域名；"
                         "3) 降低注册频率；4) 尝试不同时间段注册"
                     )
                     return False
-                else:
-                    self._log("重试成功，成功绕过 add-phone 页面，继续注册流程")
-            else:
-                self._log("未获取到新验证码，放弃注册", "error")
-                result.error_message = "重试时未获取到新验证码"
-                return False
-
+        
         # 检查是否进入 about_you 页面（需要完成用户信息设置）
         post_page_type = getattr(self, "_post_otp_page_type", "") or ""
         if post_page_type.lower() == "about_you":
@@ -850,12 +877,6 @@ class RefreshTokenRegistrationEngine:
             )
 
             self._log(f"验证码发送状态: {response.status_code}")
-            
-            # 等待邮件到达（邮件服务器需要时间）
-            wait_time = random.uniform(3.0, 6.0)
-            self._log(f"等待邮件到达: {wait_time:.1f}秒...")
-            time.sleep(wait_time)
-            
             return response.status_code == 200
 
         except Exception as e:
@@ -865,27 +886,63 @@ class RefreshTokenRegistrationEngine:
     def _get_verification_code(self) -> Optional[str]:
         """获取验证码"""
         try:
-            self._log(f"正在等待邮箱 {self.email} 的验证码...")
+            self._log(f"[步骤 1] 正在等待邮箱 {self.email} 的验证码...")
 
             email_id = self.email_info.get("service_id") if self.email_info else None
+            self._log(f"[步骤 2] email_id={email_id}")
+            
             exclude_codes = {
                 str(code).strip()
                 for code in self._used_verification_codes
                 if str(code or "").strip()
             }
+            self._log(f"[步骤 3] exclude_codes={exclude_codes}")
+            
             if exclude_codes:
                 self._log(
                     "本轮取件将跳过已取过的验证码: "
                     + ", ".join(sorted(exclude_codes))
                 )
-            code = self.email_service.get_verification_code(
-                email=self.email,
-                email_id=email_id,
-                timeout=90,
-                pattern=OTP_CODE_PATTERN,
-                otp_sent_at=self._otp_sent_at,
-                exclude_codes=exclude_codes,
-            )
+            
+            self._log(f"[步骤 4] 开始调用 email_service.get_verification_code()...")
+            try:
+                code = self.email_service.get_verification_code(
+                    email=self.email,
+                    email_id=email_id,
+                    timeout=700,
+                    pattern=OTP_CODE_PATTERN,
+                    otp_sent_at=self._otp_sent_at,
+                    exclude_codes=exclude_codes,
+                )
+                self._log(f"[步骤 5] get_verification_code 返回: code={code}")
+            except BrokenPipeError as e:
+                self._log(f"[错误] BrokenPipeError: {e}", "error")
+                import traceback
+                self._log(f"[错误] 堆栈: {traceback.format_exc()}", "error")
+                self._log("尝试重新初始化 session 后再次获取...", "warning")
+                
+                # 重新初始化 session
+                self._reset_auth_flow()
+                did, sen_token = self._prepare_authorize_flow("重新连接")
+                if not did or not sen_token:
+                    self._log("重新初始化 session 失败", "error")
+                    return None
+                
+                self._log("重新初始化 session 成功，再次尝试获取验证码...", "info")
+                code = self.email_service.get_verification_code(
+                    email=self.email,
+                    email_id=email_id,
+                    timeout=700,
+                    pattern=OTP_CODE_PATTERN,
+                    otp_sent_at=self._otp_sent_at,
+                    exclude_codes=exclude_codes,
+                )
+                self._log(f"[步骤 5b] 重试后 get_verification_code 返回: code={code}")
+            except Exception as e:
+                self._log(f"[错误] get_verification_code 异常: {type(e).__name__}: {e}", "error")
+                import traceback
+                self._log(f"[错误] 堆栈: {traceback.format_exc()}", "error")
+                return None
 
             if code:
                 self._used_verification_codes.add(str(code).strip())
@@ -898,7 +955,9 @@ class RefreshTokenRegistrationEngine:
         except TaskInterruption:
             raise
         except Exception as e:
-            self._log(f"获取验证码失败: {e}", "error")
+            self._log(f"[最外层异常] 获取验证码失败: {type(e).__name__}: {e}", "error")
+            import traceback
+            self._log(f"[最外层堆栈] {traceback.format_exc()}", "error")
             return None
 
     def _validate_verification_code(self, code: str) -> bool:

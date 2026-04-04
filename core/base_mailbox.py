@@ -529,6 +529,12 @@ class TempMailLolMailbox(BaseMailbox):
 
         seen = set(before_ids or [])
         otp_sent_at = kwargs.get("otp_sent_at")
+        exclude_codes = {
+            str(code).strip()
+            for code in (kwargs.get("exclude_codes") or set())
+            if str(code or "").strip()
+        }
+        self._log(f"[TempMailLol] 排除验证码: {exclude_codes}")
 
         def poll_once() -> Optional[str]:
             try:
@@ -538,30 +544,41 @@ class TempMailLolMailbox(BaseMailbox):
                     proxies=self.proxy,
                     timeout=10,
                 )
+                data = r.json()
+                emails = data.get("emails", [])
+                self._log(f"[TempMailLol] 获取到 {len(emails)} 封邮件")
+                if not emails and len(data) > 1:
+                    # 记录非正常情况，帮助调试
+                    self._log(f"[TempMailLol] API 返回: {str(data)[:300]}")
                 for mail in sorted(
-                    r.json().get("emails", []),
+                    emails,
                     key=lambda x: x.get("date", 0),
                     reverse=True,
                 ):
-                    mid = str(mail.get("id", ""))
-                    if mid in seen:
+                    mid = str(mail.get("id", "")).strip()
+                    # 修复：如果 API 返回空 ID，避免 "" 被 seen 拦截导致死循环
+                    if mid and mid in seen:
                         continue
-                    if otp_sent_at and mail.get("date", 0) / 1000 < otp_sent_at:
-                        continue
-                    seen.add(mid)
+                    
                     text = (
-                        mail.get("subject", "")
+                        str(mail.get("subject", ""))
                         + " "
-                        + mail.get("body", "")
+                        + str(mail.get("body", ""))
                         + " "
-                        + mail.get("html", "")
+                        + str(mail.get("html", ""))
                     )
                     if keyword and keyword.lower() not in text.lower():
                         continue
                     code = self._safe_extract(text, code_pattern)
                     if code:
+                        self._log(f"[TempMailLol] 邮件 {mid or '(空ID)'} 提取验证码={code}, 排除={code in exclude_codes}")
+                        if code in exclude_codes:
+                            continue
+                        # 使用 ID 或验证码本身作为 seen 标识符
+                        seen.add(mid or code)
                         return code
-            except Exception:
+            except Exception as e:
+                self._log(f"[TempMailLol] 轮询异常: {e}")
                 pass
             return None
 
@@ -2406,7 +2423,12 @@ class FreemailMailbox(BaseMailbox):
         if not self._session:
             self._get_session()
         import requests
-
+        import traceback
+        
+        # 记录调用栈，追踪是谁在创建邮箱
+        self._log(f"[Freemail] 正在调用 get_email() 创建新邮箱...")
+        self._log(f"[Freemail] 调用栈:\n{''.join(traceback.format_stack()[-5:-1])}")
+        
         r = self._session.get(f"{self.api}/api/generate", timeout=15)
         data = r.json()
         email = data.get("email", "")
@@ -2440,35 +2462,58 @@ class FreemailMailbox(BaseMailbox):
             for code in (kwargs.get("exclude_codes") or set())
             if str(code or "").strip()
         }
+        self._log(f"[Freemail] 排除验证码: {exclude_codes}")
+
+        # 确保 session 已初始化
+        if not self._session:
+            self._log("[Freemail] Session 未初始化，正在初始化...")
+            self._get_session()
 
         def poll_once() -> Optional[str]:
             try:
+                api_url = f"{self.api}/api/emails"
+                params = {"mailbox": account.email, "limit": 20}
+                self._log(f"[Freemail] 请求: {api_url}, 参数: {params}")
                 r = self._session.get(
-                    f"{self.api}/api/emails",
-                    params={"mailbox": account.email, "limit": 20},
+                    api_url,
+                    params=params,
                     timeout=10,
                 )
-                for msg in r.json():
+                self._log(f"[Freemail] 响应状态: {r.status_code}, 响应前 200 字符: {r.text[:200]}")
+                try:
+                    emails = r.json()
+                except Exception as json_err:
+                    self._log(f"[Freemail] JSON 解析失败: {json_err}")
+                    emails = []
+                self._log(f"[Freemail] 获取到 {len(emails)} 封邮件")
+                for msg in emails:
                     mid = str(msg.get("id", ""))
                     if not mid or mid in seen:
                         continue
                     seen.add(mid)
-                    # 直接用 verification_code 字段
+                    # 优先用 verification_code 字段
                     code = str(msg.get("verification_code") or "").strip()
                     if code and code != "None":
+                        self._log(f"[Freemail] 邮件 {mid} verification_code={code}, 排除={code in exclude_codes}")
                         if code in exclude_codes:
                             continue
                         return code
-                    # 兜底：从 preview 提取
+                    # 兜底：从 preview、subject 和 body 提取
                     text = (
-                        str(msg.get("preview", "")) + " " + str(msg.get("subject", ""))
+                        str(msg.get("preview", "")) + " " +
+                        str(msg.get("subject", "")) + " " +
+                        str(msg.get("body", "") or msg.get("html", "") or msg.get("text", "") or "")
                     )
                     code = self._safe_extract(text, code_pattern)
                     if code:
+                        self._log(f"[Freemail] 邮件 {mid} 提取验证码={code}, 排除={code in exclude_codes}")
                         if code in exclude_codes:
                             continue
                         return code
-            except Exception:
+            except Exception as e:
+                self._log(f"[Freemail] 轮询异常: {e}")
+                import traceback
+                self._log(f"[Freemail] 堆栈: {traceback.format_exc()}")
                 pass
             return None
 
