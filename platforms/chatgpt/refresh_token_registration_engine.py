@@ -626,7 +626,19 @@ class RefreshTokenRegistrationEngine:
                 if "add-phone" not in str(consent_resp.url):
                     self._log("成功通过 consent 页面，跳过 add-phone")
                     self._post_otp_page_type = "consent"
-                    self._post_otp_continue_url = str(consent_resp.url)
+                    final_url = str(consent_resp.url)
+                    self._post_otp_continue_url = final_url
+                    self._log(f"consent 最终 URL: {final_url}")
+                    
+                    # 等待一下让 cookie 完全设置
+                    time.sleep(random.uniform(1.0, 2.0))
+                    
+                    # 检查是否有 oai-client-auth-session cookie
+                    auth_cookie = self.session.cookies.get("oai-client-auth-session")
+                    if auth_cookie:
+                        self._log("检测到 oai-client-auth-session cookie")
+                    else:
+                        self._log("警告: 未检测到 oai-client-auth-session cookie，可能影响后续流程", "warning")
                 else:
                     self._log("consent 页面也被重定向到 add-phone，方法 1 失败")
             except Exception as e:
@@ -699,6 +711,12 @@ class RefreshTokenRegistrationEngine:
 
         self._log("获取 Workspace ID...")
         workspace_id = self._get_workspace_id()
+        
+        # 如果从 cookie 中获取失败，尝试通过 API 获取
+        if not workspace_id:
+            self._log("尝试通过 API 获取 Workspace ID...", "warning")
+            workspace_id = self._get_workspace_id_from_api()
+        
         if not workspace_id:
             result.error_message = "获取 Workspace ID 失败"
             return False
@@ -864,46 +882,63 @@ class RefreshTokenRegistrationEngine:
             logger.warning(f"标记邮箱状态失败: {e}")
 
     def _send_verification_code(self) -> bool:
-        """发送验证码"""
+        """发送验证码（带重复检测和重试）"""
         try:
             # 记录发送时间戳
             self._otp_sent_at = time.time()
 
-            response = self.session.get(
-                OPENAI_API_ENDPOINTS["send_otp"],
-                headers=self._build_navigation_headers(
-                    referer="https://auth.openai.com/create-account/password"
-                ),
-            )
+            max_retries = 2
+            for attempt in range(1, max_retries + 2):
+                if attempt > 1:
+                    self._log(f"验证码发送重试 {attempt - 1}/{max_retries}...", "warning")
+                    time.sleep(random.uniform(2.0, 4.0))
 
-            self._log(f"验证码发送状态: {response.status_code}")
-            return response.status_code == 200
+                response = self.session.get(
+                    OPENAI_API_ENDPOINTS["send_otp"],
+                    headers=self._build_navigation_headers(
+                        referer="https://auth.openai.com/create-account/password"
+                    ),
+                )
+
+                self._log(f"验证码发送状态: {response.status_code}")
+                
+                if response.status_code == 200:
+                    self._log("验证码发送成功")
+                    return True
+                else:
+                    self._log(f"验证码发送失败 (HTTP {response.status_code})", "warning")
+                    if attempt <= max_retries:
+                        self._log(f"将尝试重试...", "warning")
+                    else:
+                        self._log("验证码发送失败，已达到最大重试次数", "error")
+            
+            return False
 
         except Exception as e:
             self._log(f"发送验证码失败: {e}", "error")
             return False
 
     def _get_verification_code(self) -> Optional[str]:
-        """获取验证码"""
+        """获取验证码（增强重复检测和日志）"""
         try:
             self._log(f"[步骤 1] 正在等待邮箱 {self.email} 的验证码...")
 
             email_id = self.email_info.get("service_id") if self.email_info else None
             self._log(f"[步骤 2] email_id={email_id}")
-            
+
             exclude_codes = {
                 str(code).strip()
                 for code in self._used_verification_codes
                 if str(code or "").strip()
             }
             self._log(f"[步骤 3] exclude_codes={exclude_codes}")
-            
+
             if exclude_codes:
                 self._log(
                     "本轮取件将跳过已取过的验证码: "
                     + ", ".join(sorted(exclude_codes))
                 )
-            
+
             self._log(f"[步骤 4] 开始调用 email_service.get_verification_code()...")
             try:
                 code = self.email_service.get_verification_code(
@@ -920,14 +955,14 @@ class RefreshTokenRegistrationEngine:
                 import traceback
                 self._log(f"[错误] 堆栈: {traceback.format_exc()}", "error")
                 self._log("尝试重新初始化 session 后再次获取...", "warning")
-                
+
                 # 重新初始化 session
                 self._reset_auth_flow()
                 did, sen_token = self._prepare_authorize_flow("重新连接")
                 if not did or not sen_token:
                     self._log("重新初始化 session 失败", "error")
                     return None
-                
+
                 self._log("重新初始化 session 成功，再次尝试获取验证码...", "info")
                 code = self.email_service.get_verification_code(
                     email=self.email,
@@ -945,7 +980,20 @@ class RefreshTokenRegistrationEngine:
                 return None
 
             if code:
-                self._used_verification_codes.add(str(code).strip())
+                code_str = str(code).strip()
+                
+                # 检查是否为重复验证码
+                if code_str in exclude_codes:
+                    self._log(
+                        f"警告: 获取到重复验证码 {code}（与之前相同）",
+                        "warning"
+                    )
+                    self._log(
+                        "OpenAI 可能发送了重复的验证码，将在验证时自动处理",
+                        "warning"
+                    )
+                
+                self._used_verification_codes.add(code_str)
                 self._log(f"成功获取验证码: {code}")
                 return code
             else:
@@ -960,73 +1008,137 @@ class RefreshTokenRegistrationEngine:
             self._log(f"[最外层堆栈] {traceback.format_exc()}", "error")
             return None
 
-    def _validate_verification_code(self, code: str) -> bool:
-        """验证验证码（增强人类行为模拟）"""
+    def _validate_verification_code(self, code: str, max_retries: int = 2) -> bool:
+        """验证验证码（增强人类行为模拟 + 重复验证码检测与重试）"""
         try:
-            # 人类行为模拟：验证前先访问邮箱验证页面并停留
-            self._log("验证前：模拟用户查看邮箱验证码页面...")
-            try:
-                email_verification_url = "https://auth.openai.com/email-verification"
-                nav_headers = self._build_navigation_headers(referer=email_verification_url)
-                page_resp = self.session.get(
-                    email_verification_url,
-                    headers=nav_headers,
-                    allow_redirects=True,
-                    timeout=15,
+            for attempt in range(1, max_retries + 2):  # 原始尝试 + 重试次数
+                if attempt > 1:
+                    self._log(f"验证码验证重试 {attempt - 1}/{max_retries}...", "warning")
+                    
+                    # 重新发送验证码
+                    self._log("重新发送验证码...")
+                    if not self._send_verification_code():
+                        self._log("重新发送验证码失败", "error")
+                        return False
+                    
+                    # 等待新的验证码
+                    self._log("等待新的验证码...")
+                    email_id = self.email_info.get("service_id") if self.email_info else None
+                    
+                    exclude_codes = {
+                        str(c).strip()
+                        for c in self._used_verification_codes
+                        if str(c or "").strip()
+                    }
+                    
+                    # 如果检测到是重复验证码，强制排除
+                    if code in exclude_codes:
+                        self._log(f"检测到重复验证码 {code}，已自动排除", "warning")
+                    
+                    new_code = self.email_service.get_verification_code(
+                        email=self.email,
+                        email_id=email_id,
+                        timeout=120,
+                        pattern=OTP_CODE_PATTERN,
+                        otp_sent_at=self._otp_sent_at,
+                        exclude_codes=exclude_codes,
+                    )
+                    
+                    if not new_code:
+                        self._log("等待新验证码超时", "error")
+                        return False
+                    
+                    # 检查新验证码是否仍然重复
+                    if new_code in exclude_codes:
+                        self._log(f"警告: 新验证码 {new_code} 仍然是重复的，继续重试", "warning")
+                        code = new_code
+                        continue
+                    
+                    code = new_code
+                    self._used_verification_codes.add(str(code).strip())
+                    self._log(f"获取到新验证码: {code}")
+
+                # 人类行为模拟：验证前先访问邮箱验证页面并停留
+                self._log("验证前：模拟用户查看邮箱验证码页面...")
+                try:
+                    email_verification_url = "https://auth.openai.com/email-verification"
+                    nav_headers = self._build_navigation_headers(referer=email_verification_url)
+                    page_resp = self.session.get(
+                        email_verification_url,
+                        headers=nav_headers,
+                        allow_redirects=True,
+                        timeout=15,
+                    )
+                    self._log(f"验证前：邮箱验证页面状态: {page_resp.status_code}")
+                    # 模拟用户阅读验证码的时间（3-8秒）
+                    time.sleep(random.uniform(3.0, 8.0))
+                except Exception as page_err:
+                    self._log(f"验证前：页面访问异常（继续）: {page_err}")
+
+                # 模拟用户输入验证码的节奏（逐位输入，每位间隔0.5-1.5秒）
+                self._log(f"模拟输入验证码: {code}...")
+                for i, digit in enumerate(str(code)):
+                    time.sleep(random.uniform(0.5, 1.5))
+                    if i < len(str(code)) - 1:
+                        self._log(f"  输入第 {i+1} 位: {digit}")
+
+                # 输入完成后停顿1-3秒再提交
+                time.sleep(random.uniform(1.0, 3.0))
+
+                code_body = f'{{"code":"{code}"}}'
+                headers = self._build_json_headers(
+                    referer="https://auth.openai.com/email-verification",
+                    include_device_id=True,
+                    include_datadog=True,
                 )
-                self._log(f"验证前：邮箱验证页面状态: {page_resp.status_code}")
-                # 模拟用户阅读验证码的时间（3-8秒）
-                time.sleep(random.uniform(3.0, 8.0))
-            except Exception as page_err:
-                self._log(f"验证前：页面访问异常（继续）: {page_err}")
+                sen_token = self._check_sentinel(
+                    self._device_id or "",
+                    flow="email_otp_validate",
+                )
+                if sen_token:
+                    headers["openai-sentinel-token"] = sen_token
 
-            # 模拟用户输入验证码的节奏（逐位输入，每位间隔0.5-1.5秒）
-            self._log(f"模拟输入验证码: {code}...")
-            for i, digit in enumerate(str(code)):
-                time.sleep(random.uniform(0.5, 1.5))
-                if i < len(str(code)) - 1:
-                    self._log(f"  输入第 {i+1} 位: {digit}")
+                response = self.session.post(
+                    OPENAI_API_ENDPOINTS["validate_otp"],
+                    headers=headers,
+                    data=code_body,
+                )
 
-            # 输入完成后停顿1-3秒再提交
-            time.sleep(random.uniform(1.0, 3.0))
+                self._log(f"验证码校验状态: {response.status_code}")
+                
+                if response.status_code == 200:
+                    try:
+                        response_data = response.json() or {}
+                    except Exception:
+                        response_data = {}
 
-            code_body = f'{{"code":"{code}"}}'
-            headers = self._build_json_headers(
-                referer="https://auth.openai.com/email-verification",
-                include_device_id=True,
-                include_datadog=True,
-            )
-            sen_token = self._check_sentinel(
-                self._device_id or "",
-                flow="email_otp_validate",
-            )
-            if sen_token:
-                headers["openai-sentinel-token"] = sen_token
+                    self._post_otp_continue_url = str(response_data.get("continue_url") or "").strip()
+                    self._post_otp_page_type = str(
+                        ((response_data.get("page") or {}).get("type")) or ""
+                    ).strip()
+                    if self._post_otp_continue_url:
+                        self._log(f"验证码校验后 continue_url: {self._post_otp_continue_url}")
+                    if self._post_otp_page_type:
+                        self._log(f"验证码校验后页面类型: {self._post_otp_page_type}")
+                    return True
+                else:
+                    # 验证码验证失败，可能是重复的，尝试重试
+                    self._log(f"验证码验证失败 (HTTP {response.status_code})", "warning")
+                    try:
+                        error_data = response.json()
+                        self._log(f"错误响应: {json.dumps(error_data, ensure_ascii=False)[:200]}", "debug")
+                    except Exception:
+                        self._log(f"错误响应: {response.text[:200]}", "debug")
+                    
+                    if attempt <= max_retries:
+                        self._log(f"将在 {attempt}/{max_retries} 次重试后重新获取验证码", "warning")
+                        time.sleep(random.uniform(2.0, 4.0))
+                        continue
+                    else:
+                        self._log("验证码验证失败，已达到最大重试次数", "error")
+                        return False
 
-            response = self.session.post(
-                OPENAI_API_ENDPOINTS["validate_otp"],
-                headers=headers,
-                data=code_body,
-            )
-
-            self._log(f"验证码校验状态: {response.status_code}")
-            if response.status_code != 200:
-                return False
-
-            try:
-                response_data = response.json() or {}
-            except Exception:
-                response_data = {}
-
-            self._post_otp_continue_url = str(response_data.get("continue_url") or "").strip()
-            self._post_otp_page_type = str(
-                ((response_data.get("page") or {}).get("type")) or ""
-            ).strip()
-            if self._post_otp_continue_url:
-                self._log(f"验证码校验后 continue_url: {self._post_otp_continue_url}")
-            if self._post_otp_page_type:
-                self._log(f"验证码校验后页面类型: {self._post_otp_page_type}")
-            return True
+            return False
 
         except Exception as e:
             self._log(f"验证验证码失败: {e}", "error")
@@ -1269,6 +1381,17 @@ class RefreshTokenRegistrationEngine:
     def _get_workspace_id(self) -> Optional[str]:
         """从 oai-client-auth-session cookie 中解析 workspace_id。"""
         try:
+            # 先列出所有可用的 cookies，帮助诊断
+            all_cookies = {name: value[:50] + "..." if len(value) > 50 else value 
+                          for name, value in self.session.cookies.get_dict().items()}
+            self._log(f"当前会话 cookies: {list(all_cookies.keys())}")
+            
+            auth_cookie = self.session.cookies.get("oai-client-auth-session")
+            if not auth_cookie:
+                self._log("未能解码 oai-client-auth-session Cookie", "error")
+                self._log("提示: 这可能意味着 OpenAI 尚未完成会话初始化", "warning")
+                return None
+
             auth_json = self._decode_auth_session_cookie()
             if not auth_json:
                 self._log("未能解码 oai-client-auth-session Cookie", "error")
@@ -1277,6 +1400,7 @@ class RefreshTokenRegistrationEngine:
             workspaces = auth_json.get("workspaces") or []
             if not workspaces:
                 self._log("授权 Cookie 里没有 workspace 信息", "error")
+                self._log(f"Cookie 内容: {json.dumps(auth_json, ensure_ascii=False)[:200]}", "debug")
                 return None
 
             workspace_id = str((workspaces[0] or {}).get("id") or "").strip()
@@ -1288,6 +1412,48 @@ class RefreshTokenRegistrationEngine:
             return workspace_id
         except Exception as e:
             self._log(f"获取 Workspace ID 失败: {e}", "error")
+            import traceback
+            self._log(f"堆栈跟踪: {traceback.format_exc()}", "debug")
+            return None
+
+    def _get_workspace_id_from_api(self) -> Optional[str]:
+        """通过 API 获取 workspace_id（备用方案）。"""
+        try:
+            self._log("通过 API 获取 workspace 列表...")
+            response = self.session.get(
+                "https://auth.openai.com/api/accounts/workspace/",
+                headers=self._build_navigation_headers(
+                    referer="https://auth.openai.com/sign-in-with-chatgpt/codex/consent"
+                ),
+                timeout=15,
+            )
+            
+            self._log(f"Workspace API 状态: {response.status_code}")
+            if response.status_code != 200:
+                self._log(f"Workspace API 失败: {response.status_code}", "error")
+                return None
+            
+            try:
+                data = response.json()
+                workspaces = data.get("workspaces") or []
+                if not workspaces:
+                    self._log("Workspace API 返回空列表", "error")
+                    self._log(f"响应内容: {json.dumps(data, ensure_ascii=False)[:300]}", "debug")
+                    return None
+                
+                workspace_id = str((workspaces[0] or {}).get("id") or "").strip()
+                if workspace_id:
+                    self._log(f"从 API 获取到 Workspace ID: {workspace_id}")
+                    return workspace_id
+                else:
+                    self._log("API 返回的 workspace 缺少 id 字段", "error")
+                    return None
+            except Exception as e:
+                self._log(f"解析 Workspace API 响应失败: {e}", "error")
+                return None
+                
+        except Exception as e:
+            self._log(f"通过 API 获取 Workspace ID 失败: {e}", "error")
             return None
 
     def _select_workspace(self, workspace_id: str) -> Optional[str]:
