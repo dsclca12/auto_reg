@@ -1767,19 +1767,28 @@ class RefreshTokenRegistrationEngine:
                 self._log("8. 校验注册验证码...")
                 if not self._validate_verification_code(code):
                     result.error_message = "验证验证码失败"
+                    if self.email:
+                        self._check_email_domain_and_suggest()
                     return result
 
                 self._log("9. 创建用户账户...")
                 if not self._create_user_account():
                     result.error_message = "创建用户账户失败"
+                    if self.email:
+                        self._check_email_domain_and_suggest()
                     return result
 
                 login_ready, login_error = self._restart_login_flow()
                 if not login_ready:
                     result.error_message = login_error
+                    if self.email:
+                        self._check_email_domain_and_suggest()
                     return result
 
             if not self._complete_token_exchange(result):
+                # 检查邮箱域名并给出建议
+                if self.email:
+                    self._check_email_domain_and_suggest()
                 return result
 
             # 10. 完成
@@ -1809,7 +1818,39 @@ class RefreshTokenRegistrationEngine:
         except Exception as e:
             self._log(f"注册过程中发生未预期错误: {e}", "error")
             result.error_message = str(e)
+            
+            # 检查邮箱域名并给出建议
+            if self.email:
+                self._check_email_domain_and_suggest()
+            
             return result
+
+    def _check_email_domain_and_suggest(self):
+        """检查邮箱域名并给出建议"""
+        try:
+            if not self.email or '@' not in self.email:
+                return
+            
+            domain = self.email.split('@')[-1].lower()
+            
+            if domain != 'hotmail.com':
+                self._log("=" * 60, "warning")
+                self._log("⚠️  注册失败可能与邮箱域名有关", "warning")
+                self._log("=" * 60, "warning")
+                self._log(f"当前邮箱域名: {domain}", "warning")
+                self._log("建议使用: hotmail.com", "warning")
+                self._log("", "warning")
+                self._log("原因: OpenAI 对非 hotmail.com 邮箱的风控较严格", "warning")
+                self._log("使用 hotmail.com 邮箱可以提高注册成功率", "warning")
+                self._log("", "warning")
+                self._log("建议操作:", "warning")
+                self._log("1. 更换邮箱服务为 hotmail.com", "warning")
+                self._log("2. 更换住宅代理 IP", "warning")
+                self._log("3. 降低注册频率", "warning")
+                self._log("4. 尝试不同时间段注册", "warning")
+                self._log("=" * 60, "warning")
+        except Exception as e:
+            self._log(f"检查邮箱域名时出错: {e}", "debug")
 
     def save_to_database(self, result: RegistrationResult) -> bool:
         """
