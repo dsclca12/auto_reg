@@ -80,6 +80,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'Laoudo',
+        provider: 'laoudo',
         desc: '固定邮箱，手动配置',
         fields: [
           { key: 'laoudo_email', label: '邮箱地址', placeholder: 'xxx@laoudo.com' },
@@ -89,6 +90,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'Freemail',
+        provider: 'freemail',
         desc: '基于 Cloudflare Worker 的自建邮箱，支持管理员令牌或账号密码认证',
         fields: [
           { key: 'freemail_api_url', label: 'API URL', placeholder: 'https://mail.example.com' },
@@ -99,6 +101,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'MoeMail',
+        provider: 'moemail',
         desc: '自动注册账号并生成临时邮箱',
         fields: [
           { key: 'moemail_api_url', label: 'API URL', placeholder: 'https://sall.cc' },
@@ -107,6 +110,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'SkyMail',
+        provider: 'skymail',
         desc: 'CloudMail 兼容接口（addUser / emailList）',
         fields: [
           { key: 'skymail_api_base', label: 'API Base', placeholder: 'https://api.skymail.ink' },
@@ -116,6 +120,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'YYDS Mail / MaliAPI',
+        provider: 'maliapi',
         desc: '基于 API Key 创建临时邮箱并轮询收件箱消息',
         fields: [
           { key: 'maliapi_base_url', label: 'API URL', placeholder: 'https://maliapi.215.im/v1' },
@@ -126,6 +131,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'GPTMail',
+        provider: 'gptmail',
         desc: '基于 GPTMail API 生成临时邮箱并轮询邮件；若已知本站可用域名，也可本地拼装随机地址',
         fields: [
           { key: 'gptmail_base_url', label: 'API URL', placeholder: 'https://mail.chatgpt.org.uk' },
@@ -135,6 +141,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'OpenTrashMail',
+        provider: 'opentrashmail',
         desc: '对接 opentrashmail 服务；可直接轮询 /json/<email>，也支持已知域名时本地拼装随机地址',
         fields: [
           { key: 'opentrashmail_api_url', label: 'API URL', placeholder: 'http://mail.example.com:8085' },
@@ -144,11 +151,13 @@ const TAB_ITEMS = [
       },
       {
         title: 'TempMail.lol',
+        provider: 'tempmail_lol',
         desc: '自动生成邮箱，无需配置，需要代理访问（CN IP 被封）',
         fields: [],
       },
       {
         title: 'DuckMail',
+        provider: 'duckmail',
         desc: '自动生成邮箱，随机创建账号',
         fields: [
           { key: 'duckmail_api_url', label: 'Web URL', placeholder: 'https://www.duckmail.sbs' },
@@ -160,6 +169,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'CF Worker 自建邮箱',
+        provider: 'cfworker',
         desc: '基于 Cloudflare Worker 的自建临时邮箱服务',
         fields: [
           { key: 'cfworker_api_url', label: 'API URL', placeholder: 'https://apimail.example.com' },
@@ -172,6 +182,7 @@ const TAB_ITEMS = [
       },
       {
         title: 'LuckMail',
+        provider: 'luckmail',
         desc: 'ChatGPT 走购买邮箱，其他平台继续走订单接码老逻辑',
         fields: [
           { key: 'luckmail_base_url', label: '平台地址', placeholder: 'https://mails.luckyous.com' },
@@ -342,6 +353,7 @@ interface SectionConfig {
   title: string
   desc?: string
   fields: FieldConfig[]
+  provider?: string
 }
 
 interface TabConfig {
@@ -438,6 +450,36 @@ function ConfigSection({ section }: { section: SectionConfig }) {
         <ConfigField key={field.key} field={field} />
       ))}
     </Card>
+  )
+}
+
+function MailboxSections({ form, sections }: { form: any; sections: SectionConfig[] }) {
+  const selectedProvider = Form.useWatch('mail_provider', form) || 'luckmail'
+  const baseSections = sections.filter((section) => !section.provider)
+  const providerSections = sections.filter((section) => section.provider)
+  const activeProviderSection =
+    providerSections.find((section) => section.provider === selectedProvider) || providerSections[0]
+
+  return (
+    <>
+      {baseSections.map((section) => (
+        <ConfigSection key={section.title} section={section} />
+      ))}
+
+      {activeProviderSection ? (
+        <Card
+          title={activeProviderSection.title}
+          extra={activeProviderSection.desc && <span style={{ fontSize: 12, color: '#7a8ba3' }}>{activeProviderSection.desc}</span>}
+          style={{ marginBottom: 16 }}
+        >
+          {activeProviderSection.fields.length > 0 ? (
+            activeProviderSection.fields.map((field) => <ConfigField key={field.key} field={field} />)
+          ) : (
+            <Typography.Text type="secondary">当前邮箱服务无需额外配置。</Typography.Text>
+          )}
+        </Card>
+      ) : null}
+    </>
   )
 }
 
@@ -1148,10 +1190,19 @@ export default function Settings() {
           ) : (
             <Form form={form} layout="vertical">
               {activeTab === 'captcha' ? <SolverStatus /> : null}
-              {currentTab.sections.map((section) => (
-                <ConfigSection key={section.title} section={section} />
-              ))}
-              {activeTab === 'mailbox' ? <CFWorkerDomainPoolSection form={form} /> : null}
+              {activeTab === 'mailbox' ? (
+                <>
+                  <MailboxSections form={form} sections={currentTab.sections} />
+                  {(() => {
+                    const selectedMailProvider = form.getFieldValue('mail_provider') || 'luckmail'
+                    return selectedMailProvider === 'cfworker' ? <CFWorkerDomainPoolSection form={form} /> : null
+                  })()}
+                </>
+              ) : (
+                currentTab.sections.map((section) => (
+                  <ConfigSection key={section.title} section={section} />
+                ))
+              )}
               <Button type="primary" icon={<SaveOutlined />} onClick={save} loading={saving} block>
                 {saved ? '已保存 ✓' : '保存配置'}
               </Button>
