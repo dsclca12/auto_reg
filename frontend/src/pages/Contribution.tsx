@@ -24,7 +24,7 @@ export default function ContributionPage() {
 
   // 配置状态
   const [config, setConfig] = useState({
-    enabled: true,
+    enabled: false,  // 默认关闭
     api_url: '',
     api_key: '',
   })

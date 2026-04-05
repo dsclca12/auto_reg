@@ -108,7 +108,7 @@ async def get_config():
     """获取贡献配置"""
     config = ConfigStore()
     return {
-        "enabled": config.get("contribution_enabled", True),
+        "enabled": config.get("contribution_enabled", False),  # 默认关闭
         "api_url": config.get("contribution_api_url", ""),
         "api_key": config.get("contribution_api_key", ""),
     }
