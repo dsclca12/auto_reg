@@ -47,6 +47,7 @@ class AccessTokenOnlyRegistrationEngine:
         task_uuid: Optional[str] = None,
         max_retries: int = 3,
         extra_config: Optional[dict] = None,
+        interrupt_checker: Optional[Callable[[], None]] = None,
     ):
         self.email_service = email_service
         self.proxy_url = proxy_url
@@ -55,12 +56,28 @@ class AccessTokenOnlyRegistrationEngine:
         self.task_uuid = task_uuid
         self.max_retries = max(1, int(max_retries or 1))
         self.extra_config = dict(extra_config or {})
+        self.interrupt_checker = interrupt_checker
         
         self.email = None
         self.password = None
         self.logs = []
+
+    def _checkpoint(self) -> None:
+        checker = self.interrupt_checker
+        if callable(checker):
+            checker()
+
+    def _sleep_with_checkpoint(self, seconds: float) -> None:
+        remaining = max(float(seconds or 0), 0.0)
+        sleep_fn = time.sleep
+        while remaining > 0:
+            self._checkpoint()
+            chunk = min(0.25, remaining)
+            sleep_fn(chunk)
+            remaining -= chunk
         
     def _log(self, message: str, level: str = "info"):
+        self._checkpoint()
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_message = f"[{timestamp}] {message}"
         self.logs.append(log_message)
@@ -100,6 +117,7 @@ class AccessTokenOnlyRegistrationEngine:
             last_error = ""
             for attempt in range(self.max_retries):
                 try:
+                    self._checkpoint()
                     if attempt == 0:
                         self._log("=" * 60)
                         self._log("开始注册流程 V2 (Session 复用直取 AccessToken)")
@@ -107,9 +125,10 @@ class AccessTokenOnlyRegistrationEngine:
                         self._log("=" * 60)
                     else:
                         self._log(f"整流程重试 {attempt + 1}/{self.max_retries} ...")
-                        time.sleep(1)
+                        self._sleep_with_checkpoint(1)
 
                     # 1. 创建邮箱
+                    self._checkpoint()
                     email_data = self.email_service.create_email()
                     email_addr = self.email or (email_data.get('email') if email_data else None)
                     if not email_addr:
@@ -136,11 +155,12 @@ class AccessTokenOnlyRegistrationEngine:
                         proxy=self.proxy_url,
                         verbose=False,
                         browser_mode=self.browser_mode,
+                        interrupt_checker=self.interrupt_checker,
                     )
                     chatgpt_client._log = self._log
 
                     self._log("步骤 1/2: 执行注册状态机...")
-
+                    self._checkpoint()
                     success, msg = chatgpt_client.register_complete_flow(
                         email_addr, pwd, first_name, last_name, birthdate, skymail_adapter
                     )
@@ -154,6 +174,7 @@ class AccessTokenOnlyRegistrationEngine:
                         return result
 
                     self._log("步骤 2/2: 复用注册会话，直接获取 ChatGPT Session / AccessToken...")
+                    self._checkpoint()
                     session_ok, session_result = chatgpt_client.reuse_session_and_get_tokens()
 
                     if session_ok:

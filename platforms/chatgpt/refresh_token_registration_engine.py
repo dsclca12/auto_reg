@@ -104,6 +104,7 @@ class RefreshTokenRegistrationEngine:
         callback_logger: Optional[Callable[[str], None]] = None,
         task_uuid: Optional[str] = None,
         browser_mode: str = "headless",
+        interrupt_checker: Optional[Callable[[], None]] = None,
     ):
         """
         初始化注册引擎
@@ -119,6 +120,7 @@ class RefreshTokenRegistrationEngine:
         self.callback_logger = callback_logger or (lambda msg: logger.info(msg))
         self.task_uuid = task_uuid
         self.browser_mode = str(browser_mode or "headless").strip().lower()
+        self.interrupt_checker = interrupt_checker
 
         # 创建 HTTP 客户端
         self.http_client = OpenAIHTTPClient(proxy_url=proxy_url)
@@ -150,8 +152,37 @@ class RefreshTokenRegistrationEngine:
         self._post_otp_continue_url: str = ""
         self._post_otp_page_type: str = ""
 
+    def _checkpoint(self) -> None:
+        checker = self.interrupt_checker
+        if callable(checker):
+            checker()
+
+    def _sleep_with_checkpoint(self, seconds: float) -> None:
+        remaining = max(float(seconds or 0), 0.0)
+        sleep_fn = time.sleep
+        while remaining > 0:
+            self._checkpoint()
+            chunk = min(0.25, remaining)
+            sleep_fn(chunk)
+            remaining -= chunk
+
+    def _session_get(self, url: str, **kwargs):
+        self._checkpoint()
+        session = self.session
+        response = session.get(url, **kwargs)
+        self._checkpoint()
+        return response
+
+    def _session_post(self, url: str, **kwargs):
+        self._checkpoint()
+        session = self.session
+        response = session.post(url, **kwargs)
+        self._checkpoint()
+        return response
+
     def _log(self, message: str, level: str = "info"):
         """记录日志"""
+        self._checkpoint()
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_message = f"[{timestamp}] {message}"
 
@@ -213,7 +244,8 @@ class RefreshTokenRegistrationEngine:
             self.email = email_value
             self._log(f"成功创建邮箱: {self.email}")
             return True
-
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"创建邮箱失败: {e}", "error")
             return False
@@ -225,6 +257,8 @@ class RefreshTokenRegistrationEngine:
             self.oauth_start = self.oauth_manager.start_oauth()
             self._log(f"OAuth URL 已生成: {self.oauth_start.auth_url[:80]}...")
             return True
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"生成 OAuth URL 失败: {e}", "error")
             return False
@@ -236,6 +270,8 @@ class RefreshTokenRegistrationEngine:
             if self._device_id:
                 seed_oai_device_cookie(self.session, self._device_id)
             return True
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"初始化会话失败: {e}", "error")
             return False
@@ -256,7 +292,7 @@ class RefreshTokenRegistrationEngine:
 
                 seed_oai_device_cookie(self.session, self._device_id)
 
-                response = self.session.get(
+                response = self._session_get(
                     self.oauth_start.auth_url,
                     timeout=20
                 )
@@ -269,6 +305,8 @@ class RefreshTokenRegistrationEngine:
                     f"获取 Device ID 失败: 建立 OAuth 会话返回 HTTP {response.status_code} (第 {attempt}/{max_attempts} 次)",
                     "warning" if attempt < max_attempts else "error"
                 )
+            except TaskInterruption:
+                raise
             except Exception as e:
                 self._log(
                     f"获取 Device ID 失败: {e} (第 {attempt}/{max_attempts} 次)",
@@ -276,7 +314,7 @@ class RefreshTokenRegistrationEngine:
                 )
 
             if attempt < max_attempts:
-                time.sleep(attempt)
+                self._sleep_with_checkpoint(attempt)
                 self.http_client.close()
                 self.session = self.http_client.session
 
@@ -360,6 +398,8 @@ class RefreshTokenRegistrationEngine:
                 return sen_token
             self._log(f"Sentinel 检查失败: 未获取到 token ({flow})", "warning")
             return None
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"Sentinel 检查异常 ({flow}): {e}", "warning")
             return None
@@ -388,7 +428,7 @@ class RefreshTokenRegistrationEngine:
                 nav_headers = self._build_navigation_headers(referer=page_url)
                 
                 # 第一次访问：获取 cf_clearance cookie
-                page_resp = self.session.get(
+                page_resp = self._session_get(
                     page_url,
                     headers=nav_headers,
                     allow_redirects=True,
@@ -404,17 +444,18 @@ class RefreshTokenRegistrationEngine:
                     self._log(f"{log_label}: 未获取到 cf_clearance，可能需要等待")
                 
                 # 等待 Cloudflare JS challenge 完成
-                time.sleep(random.uniform(2.0, 4.0))
+                self._sleep_with_checkpoint(random.uniform(2.0, 4.0))
                 
                 # 第二次访问：确保 challenge 完全完成
-                page_resp2 = self.session.get(
+                page_resp2 = self._session_get(
                     page_url,
                     headers=nav_headers,
                     allow_redirects=True,
                     timeout=15,
                 )
                 self._log(f"{log_label}: 二次访问状态: {page_resp2.status_code}")
-                
+            except TaskInterruption:
+                raise
             except Exception as page_err:
                 self._log(f"{log_label}: 页面访问异常（继续尝试）: {page_err}")
 
@@ -437,9 +478,9 @@ class RefreshTokenRegistrationEngine:
                 headers["openai-sentinel-token"] = sen_token
 
             # 提交请求前添加自然延迟
-            time.sleep(random.uniform(0.8, 2.0))
+            self._sleep_with_checkpoint(random.uniform(0.8, 2.0))
 
-            response = self.session.post(
+            response = self._session_post(
                 OPENAI_API_ENDPOINTS["signup"],
                 headers=headers,
                 data=request_body,
@@ -476,11 +517,15 @@ class RefreshTokenRegistrationEngine:
                     response_data=response_data
                 )
 
+            except TaskInterruption:
+                raise
             except Exception as parse_error:
                 self._log(f"解析响应失败: {parse_error}", "warning")
                 # 无法解析，默认成功
                 return SignupFormResult(success=True)
 
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"{log_label}失败: {e}", "error")
             return SignupFormResult(success=False, error_message=str(e))
@@ -525,7 +570,7 @@ class RefreshTokenRegistrationEngine:
             if sen_token:
                 headers["openai-sentinel-token"] = sen_token
 
-            response = self.session.post(
+            response = self._session_post(
                 OPENAI_API_ENDPOINTS["password_verify"],
                 headers=headers,
                 data=json.dumps({"password": self.password}),
@@ -555,6 +600,8 @@ class RefreshTokenRegistrationEngine:
                 response_data=response_data,
             )
 
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"提交登录密码失败: {e}", "error")
             return SignupFormResult(success=False, error_message=str(e))
@@ -615,7 +662,7 @@ class RefreshTokenRegistrationEngine:
             self._log("尝试 1：直接访问 consent 页面...")
             try:
                 consent_url = "https://auth.openai.com/sign-in-with-chatgpt/codex/consent"
-                consent_resp = self.session.get(
+                consent_resp = self._session_get(
                     consent_url,
                     headers=self._build_navigation_headers(referer=consent_url),
                     allow_redirects=True,
@@ -631,7 +678,7 @@ class RefreshTokenRegistrationEngine:
                     self._log(f"consent 最终 URL: {final_url}")
                     
                     # 等待一下让 cookie 完全设置
-                    time.sleep(random.uniform(1.0, 2.0))
+                    self._sleep_with_checkpoint(random.uniform(1.0, 2.0))
                     
                     # 检查是否有 oai-client-auth-session cookie
                     auth_cookie = self.session.cookies.get("oai-client-auth-session")
@@ -648,7 +695,7 @@ class RefreshTokenRegistrationEngine:
             if getattr(self, "_post_otp_page_type", "") == "add_phone":
                 self._log("尝试 2：访问 about-you 页面建立 Cookie...")
                 try:
-                    about_resp = self.session.get(
+                    about_resp = self._session_get(
                         "https://auth.openai.com/about-you",
                         headers=self._build_navigation_headers(
                             referer="https://auth.openai.com/email-verification"
@@ -688,7 +735,7 @@ class RefreshTokenRegistrationEngine:
             try:
                 about_you_url = "https://auth.openai.com/about-you"
                 nav_headers = self._build_navigation_headers(referer=about_you_url)
-                page_resp = self.session.get(
+                page_resp = self._session_get(
                     about_you_url,
                     headers=nav_headers,
                     allow_redirects=True,
@@ -696,7 +743,7 @@ class RefreshTokenRegistrationEngine:
                 )
                 self._log(f"访问 about-you 页面状态: {page_resp.status_code}")
                 # 等待页面完成 Cookie 设置
-                time.sleep(random.uniform(2.0, 4.0))
+                self._sleep_with_checkpoint(random.uniform(2.0, 4.0))
                 
                 # 检查重定向后的 URL，看是否已经跳转到 consent 或其他页面
                 final_url = str(page_resp.url or "")
@@ -806,14 +853,14 @@ class RefreshTokenRegistrationEngine:
             try:
                 page_url = "https://auth.openai.com/create-account/password"
                 nav_headers = self._build_navigation_headers(referer=page_url)
-                page_resp = self.session.get(
+                page_resp = self._session_get(
                     page_url,
                     headers=nav_headers,
                     allow_redirects=True,
                     timeout=15,
                 )
                 self._log(f"提交密码前：页面访问状态: {page_resp.status_code}")
-                time.sleep(random.uniform(1.5, 3.0))
+                self._sleep_with_checkpoint(random.uniform(1.5, 3.0))
             except Exception as page_err:
                 self._log(f"提交密码前：页面访问异常（继续尝试）: {page_err}")
 
@@ -836,9 +883,9 @@ class RefreshTokenRegistrationEngine:
                 headers["openai-sentinel-token"] = sen_token
 
             # 提交前添加自然延迟
-            time.sleep(random.uniform(1.0, 2.5))
+            self._sleep_with_checkpoint(random.uniform(1.0, 2.5))
 
-            response = self.session.post(
+            response = self._session_post(
                 OPENAI_API_ENDPOINTS["register"],
                 headers=headers,
                 data=register_body,
@@ -903,9 +950,9 @@ class RefreshTokenRegistrationEngine:
             for attempt in range(1, max_retries + 2):
                 if attempt > 1:
                     self._log(f"验证码发送重试 {attempt - 1}/{max_retries}...", "warning")
-                    time.sleep(random.uniform(2.0, 4.0))
+                    self._sleep_with_checkpoint(random.uniform(2.0, 4.0))
 
-                response = self.session.get(
+                response = self._session_get(
                     OPENAI_API_ENDPOINTS["send_otp"],
                     headers=self._build_navigation_headers(
                         referer="https://auth.openai.com/create-account/password"
@@ -1075,7 +1122,7 @@ class RefreshTokenRegistrationEngine:
                 try:
                     email_verification_url = "https://auth.openai.com/email-verification"
                     nav_headers = self._build_navigation_headers(referer=email_verification_url)
-                    page_resp = self.session.get(
+                    page_resp = self._session_get(
                         email_verification_url,
                         headers=nav_headers,
                         allow_redirects=True,
@@ -1083,19 +1130,19 @@ class RefreshTokenRegistrationEngine:
                     )
                     self._log(f"验证前：邮箱验证页面状态: {page_resp.status_code}")
                     # 模拟用户阅读验证码的时间（3-8秒）
-                    time.sleep(random.uniform(3.0, 8.0))
+                    self._sleep_with_checkpoint(random.uniform(3.0, 8.0))
                 except Exception as page_err:
                     self._log(f"验证前：页面访问异常（继续）: {page_err}")
 
                 # 模拟用户输入验证码的节奏（逐位输入，每位间隔0.5-1.5秒）
                 self._log(f"模拟输入验证码: {code}...")
                 for i, digit in enumerate(str(code)):
-                    time.sleep(random.uniform(0.5, 1.5))
+                    self._sleep_with_checkpoint(random.uniform(0.5, 1.5))
                     if i < len(str(code)) - 1:
                         self._log(f"  输入第 {i+1} 位: {digit}")
 
                 # 输入完成后停顿1-3秒再提交
-                time.sleep(random.uniform(1.0, 3.0))
+                self._sleep_with_checkpoint(random.uniform(1.0, 3.0))
 
                 code_body = f'{{"code":"{code}"}}'
                 headers = self._build_json_headers(
@@ -1110,7 +1157,7 @@ class RefreshTokenRegistrationEngine:
                 if sen_token:
                     headers["openai-sentinel-token"] = sen_token
 
-                response = self.session.post(
+                response = self._session_post(
                     OPENAI_API_ENDPOINTS["validate_otp"],
                     headers=headers,
                     data=code_body,
@@ -1144,7 +1191,7 @@ class RefreshTokenRegistrationEngine:
                     
                     if attempt <= max_retries:
                         self._log(f"将在 {attempt}/{max_retries} 次重试后重新获取验证码", "warning")
-                        time.sleep(random.uniform(2.0, 4.0))
+                        self._sleep_with_checkpoint(random.uniform(2.0, 4.0))
                         continue
                     else:
                         self._log("验证码验证失败，已达到最大重试次数", "error")
@@ -1175,7 +1222,7 @@ class RefreshTokenRegistrationEngine:
             if sen_token:
                 headers["openai-sentinel-token"] = sen_token
 
-            response = self.session.post(
+            response = self._session_post(
                 OPENAI_API_ENDPOINTS["create_account"],
                 headers=headers,
                 data=create_account_body,
@@ -1204,7 +1251,7 @@ class RefreshTokenRegistrationEngine:
             if retry_token:
                 headers["openai-sentinel-token"] = retry_token
 
-            retry_resp = self.session.post(
+            retry_resp = self._session_post(
                 OPENAI_API_ENDPOINTS["create_account"],
                 headers=headers,
                 data=create_account_body,
@@ -1280,7 +1327,7 @@ class RefreshTokenRegistrationEngine:
             self._log(f"OAuth 跟随重定向 {hop + 1}/{max_depth}: {current_url[:120]}...")
 
             try:
-                response = self.session.get(
+                response = self._session_get(
                     current_url,
                     headers=self._build_navigation_headers(referer=referer),
                     allow_redirects=False,
@@ -1322,7 +1369,7 @@ class RefreshTokenRegistrationEngine:
             headers["openai-sentinel-token"] = sen_token
 
         try:
-            response = self.session.post(
+            response = self._session_post(
                 OPENAI_API_ENDPOINTS["create_account"],
                 headers=headers,
                 data=json.dumps(user_info),
@@ -1358,7 +1405,7 @@ class RefreshTokenRegistrationEngine:
         if continue_url and "about-you" in continue_url:
             self._log("OTP 后进入 about-you，按参考 RT 逻辑补齐 consent 跳转...")
             try:
-                response = self.session.get(
+                response = self._session_get(
                     "https://auth.openai.com/about-you",
                     headers=self._build_navigation_headers(
                         referer="https://auth.openai.com/email-verification"
@@ -1394,11 +1441,18 @@ class RefreshTokenRegistrationEngine:
         """从 oai-client-auth-session cookie 中解析 workspace_id。"""
         try:
             # 先列出所有可用的 cookies，帮助诊断
-            all_cookies = {name: value[:50] + "..." if len(value) > 50 else value 
-                          for name, value in self.session.cookies.get_dict().items()}
-            self._log(f"当前会话 cookies: {list(all_cookies.keys())}")
+            cookies = getattr(self.session, "cookies", None)
+            get_dict = getattr(cookies, "get_dict", None)
+            if callable(get_dict):
+                cookie_map = get_dict()
+                if isinstance(cookie_map, dict):
+                    all_cookies = {
+                        name: value[:50] + "..." if len(value) > 50 else value
+                        for name, value in cookie_map.items()
+                    }
+                    self._log(f"当前会话 cookies: {list(all_cookies.keys())}")
             
-            auth_cookie = self.session.cookies.get("oai-client-auth-session")
+            auth_cookie = cookies.get("oai-client-auth-session") if cookies is not None else None
             if not auth_cookie:
                 self._log("未能解码 oai-client-auth-session Cookie", "error")
                 self._log("提示: 这可能意味着 OpenAI 尚未完成会话初始化", "warning")
@@ -1432,7 +1486,7 @@ class RefreshTokenRegistrationEngine:
         """通过 API 获取 workspace_id（备用方案）。"""
         try:
             self._log("通过 API 获取 workspace 列表...")
-            response = self.session.get(
+            response = self._session_get(
                 "https://auth.openai.com/api/accounts/workspace/",
                 headers=self._build_navigation_headers(
                     referer="https://auth.openai.com/sign-in-with-chatgpt/codex/consent"
@@ -1471,7 +1525,7 @@ class RefreshTokenRegistrationEngine:
     def _select_workspace(self, workspace_id: str) -> Optional[str]:
         """兼容旧逻辑：仅提交 workspace 并返回 continue_url。"""
         try:
-            response = self.session.post(
+            response = self._session_post(
                 OPENAI_API_ENDPOINTS["select_workspace"],
                 headers=self._build_json_headers(
                     referer="https://auth.openai.com/sign-in-with-chatgpt/codex/consent",
@@ -1518,7 +1572,7 @@ class RefreshTokenRegistrationEngine:
         self._log(f"consent URL: {consent_url}")
 
         try:
-            response = self.session.get(
+            response = self._session_get(
                 consent_url,
                 headers=self._build_navigation_headers(
                     referer="https://auth.openai.com/email-verification"
@@ -1543,7 +1597,7 @@ class RefreshTokenRegistrationEngine:
         workspace_id = self._get_workspace_id() or ""
         if workspace_id:
             try:
-                ws_response = self.session.post(
+                ws_response = self._session_post(
                     OPENAI_API_ENDPOINTS["select_workspace"],
                     headers=self._build_json_headers(
                         referer=consent_url,
@@ -1595,7 +1649,7 @@ class RefreshTokenRegistrationEngine:
                                 org_payload["project_id"] = project_id
 
                             org_referer = ws_continue_url or consent_url
-                            org_response = self.session.post(
+                            org_response = self._session_post(
                                 OPENAI_API_ENDPOINTS["select_organization"],
                                 headers=self._build_json_headers(
                                     referer=org_referer,
@@ -1652,7 +1706,7 @@ class RefreshTokenRegistrationEngine:
                 self._log(f"处理 workspace/select 响应异常: {e}", "warning")
 
         try:
-            response = self.session.get(
+            response = self._session_get(
                 consent_url,
                 headers=self._build_navigation_headers(
                     referer="https://auth.openai.com/email-verification"
@@ -1698,7 +1752,7 @@ class RefreshTokenRegistrationEngine:
                     if attempt < max_retries:
                         self._log(f"OAuth 回调处理失败 (尝试 {attempt}/{max_retries}): {retry_error}", "warning")
                         import time
-                        time.sleep(2)  # 等待 2 秒后重试
+                        self._sleep_with_checkpoint(2)  # 等待 2 秒后重试
                     else:
                         raise
 

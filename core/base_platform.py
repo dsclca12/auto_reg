@@ -93,6 +93,28 @@ class BasePlatform(ABC):
         if mailbox is not None:
             mailbox._task_control = task_control
 
+    def checkpoint_task_control(self) -> None:
+        """在平台内部显式消费 stop/skip 信号。"""
+        task_control = getattr(self, "_task_control", None)
+        if task_control is None:
+            return
+        task_control.checkpoint(
+            attempt_id=getattr(self, "_task_attempt_token", None),
+        )
+
+    def build_interrupt_checker(self):
+        """导出给非平台类复用的 checkpoint 回调。"""
+        task_control = getattr(self, "_task_control", None)
+        if task_control is None:
+            return None
+
+        def _interrupt_checker():
+            task_control.checkpoint(
+                attempt_id=getattr(self, "_task_attempt_token", None),
+            )
+
+        return _interrupt_checker
+
     def get_mailbox_otp_timeout(self, default: int = 120) -> int:
         """统一解析邮箱 OTP 等待秒数，避免平台内散落魔法值。"""
         extra = getattr(self.config, "extra", {}) or {}
