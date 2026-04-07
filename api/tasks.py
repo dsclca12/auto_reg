@@ -251,6 +251,7 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                 platform = platform_cls(config=config, mailbox=mailbox)
                 platform._log_fn = lambda msg: _log(task_id, msg)
                 platform.bind_task_control(task_control)
+                platform._task_attempt_token = attempt_id
                 if getattr(platform, "mailbox", None) is not None:
                     platform.mailbox._log_fn = platform._log_fn
                     platform.mailbox._task_attempt_token = attempt_id
@@ -635,4 +636,3 @@ def get_task(task_id: str):
 @router.get("")
 def list_tasks():
     return _task_store.list_snapshots()
-

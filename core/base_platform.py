@@ -98,7 +98,9 @@ class BasePlatform(ABC):
         task_control = getattr(self, "_task_control", None)
         if task_control is None:
             return
-        task_control.checkpoint()
+        task_control.checkpoint(
+            attempt_id=getattr(self, "_task_attempt_token", None),
+        )
 
     def build_interrupt_checker(self):
         """导出给非平台类复用的 checkpoint 回调。"""
@@ -107,7 +109,9 @@ class BasePlatform(ABC):
             return None
 
         def _interrupt_checker():
-            task_control.checkpoint()
+            task_control.checkpoint(
+                attempt_id=getattr(self, "_task_attempt_token", None),
+            )
 
         return _interrupt_checker
 
