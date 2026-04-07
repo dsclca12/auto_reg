@@ -86,7 +86,7 @@ class Scheduler:
         """检查并执行到期的定时任务"""
         # 延迟导入，避免循环导入
         global _scheduled_register_tasks, _task_run_status, _scheduled_tasks_lock, _task_status_lock
-        from api.tasks import _run_register, RegisterTaskRequest
+        from api.tasks import _create_task_record, _run_register, _task_store, RegisterTaskRequest
         
         with _scheduled_tasks_lock:
             tasks = dict(_scheduled_register_tasks)
@@ -131,20 +131,28 @@ class Scheduler:
                 print(f"[Scheduler] 执行定时任务 {task_id}")
                 run_task_id = f"scheduled_{task_id}_{int(time.time())}"
                 def run_task():
+                    success = False
+                    error = None
                     try:
-                        # 初始化 _tasks 记录
-                        from api.tasks import _tasks, _tasks_lock
-                        with _tasks_lock:
-                            _tasks[run_task_id] = {"id": run_task_id, "status": "pending", "progress": "0/1", "logs": []}
                         req = RegisterTaskRequest(**task_config)
+                        _create_task_record(
+                            run_task_id,
+                            req,
+                            "schedule",
+                            {"scheduled_task_id": task_id, "scope": "auto-run"},
+                        )
                         _run_register(run_task_id, req)
+                        snapshot = _task_store.snapshot(run_task_id)
+                        success = snapshot.get("status") == "done" and not snapshot.get("errors")
+                        error = snapshot.get("error")
                         print(f"[Scheduler] 任务 {task_id} 执行完成")
                     except Exception as e:
+                        error = str(e)
                         print(f"[Scheduler] 任务 {task_id} 执行失败：{e}")
                     finally:
                         # 更新运行状态
                         from core.scheduler import update_task_run_status
-                        update_task_run_status(task_id, True, None)
+                        update_task_run_status(task_id, success, error)
                 threading.Thread(target=run_task, daemon=True).start()
 
 
