@@ -244,7 +244,8 @@ class RefreshTokenRegistrationEngine:
             self.email = email_value
             self._log(f"成功创建邮箱: {self.email}")
             return True
-
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"创建邮箱失败: {e}", "error")
             return False
@@ -256,6 +257,8 @@ class RefreshTokenRegistrationEngine:
             self.oauth_start = self.oauth_manager.start_oauth()
             self._log(f"OAuth URL 已生成: {self.oauth_start.auth_url[:80]}...")
             return True
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"生成 OAuth URL 失败: {e}", "error")
             return False
@@ -267,6 +270,8 @@ class RefreshTokenRegistrationEngine:
             if self._device_id:
                 seed_oai_device_cookie(self.session, self._device_id)
             return True
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"初始化会话失败: {e}", "error")
             return False
@@ -300,6 +305,8 @@ class RefreshTokenRegistrationEngine:
                     f"获取 Device ID 失败: 建立 OAuth 会话返回 HTTP {response.status_code} (第 {attempt}/{max_attempts} 次)",
                     "warning" if attempt < max_attempts else "error"
                 )
+            except TaskInterruption:
+                raise
             except Exception as e:
                 self._log(
                     f"获取 Device ID 失败: {e} (第 {attempt}/{max_attempts} 次)",
@@ -391,6 +398,8 @@ class RefreshTokenRegistrationEngine:
                 return sen_token
             self._log(f"Sentinel 检查失败: 未获取到 token ({flow})", "warning")
             return None
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"Sentinel 检查异常 ({flow}): {e}", "warning")
             return None
@@ -445,7 +454,8 @@ class RefreshTokenRegistrationEngine:
                     timeout=15,
                 )
                 self._log(f"{log_label}: 二次访问状态: {page_resp2.status_code}")
-                
+            except TaskInterruption:
+                raise
             except Exception as page_err:
                 self._log(f"{log_label}: 页面访问异常（继续尝试）: {page_err}")
 
@@ -507,11 +517,15 @@ class RefreshTokenRegistrationEngine:
                     response_data=response_data
                 )
 
+            except TaskInterruption:
+                raise
             except Exception as parse_error:
                 self._log(f"解析响应失败: {parse_error}", "warning")
                 # 无法解析，默认成功
                 return SignupFormResult(success=True)
 
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"{log_label}失败: {e}", "error")
             return SignupFormResult(success=False, error_message=str(e))
@@ -586,6 +600,8 @@ class RefreshTokenRegistrationEngine:
                 response_data=response_data,
             )
 
+        except TaskInterruption:
+            raise
         except Exception as e:
             self._log(f"提交登录密码失败: {e}", "error")
             return SignupFormResult(success=False, error_message=str(e))

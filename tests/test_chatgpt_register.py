@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest import mock
 
-from core.task_runtime import StopTaskRequested
+from core.task_runtime import SkipCurrentAttemptRequested, StopTaskRequested
 from platforms.chatgpt.refresh_token_registration_engine import (
     RefreshTokenRegistrationEngine,
     SignupFormResult,
@@ -138,6 +138,26 @@ class RegistrationEngineFlowTests(unittest.TestCase):
                 (second_session, "device-fixed"),
             ],
         )
+
+    def test_get_device_id_propagates_skip_without_retry(self):
+        engine = RefreshTokenRegistrationEngine(
+            email_service=DummyEmailService(),
+            proxy_url="http://127.0.0.1:7890",
+            callback_logger=lambda msg: None,
+            interrupt_checker=lambda: (_ for _ in ()).throw(
+                SkipCurrentAttemptRequested()
+            ),
+        )
+        engine.oauth_start = mock.Mock(
+            auth_url="https://auth.openai.com/oauth/authorize"
+        )
+        engine.session = mock.Mock()
+        engine.session.get = mock.Mock()
+
+        with self.assertRaises(SkipCurrentAttemptRequested):
+            engine._get_device_id()
+
+        engine.session.get.assert_not_called()
 
     def test_run_restarts_login_after_new_registration(self):
         engine = self._make_engine()
