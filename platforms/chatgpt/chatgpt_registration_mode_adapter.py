@@ -61,6 +61,7 @@ class ChatGPTRegistrationContext:
     browser_mode: str
     max_retries: int
     extra_config: dict
+    interrupt_checker: Optional[Callable[[], None]] = None
 
 
 class BaseChatGPTRegistrationModeAdapter(ABC):
@@ -113,6 +114,7 @@ class RefreshTokenChatGPTRegistrationAdapter(BaseChatGPTRegistrationModeAdapter)
             proxy_url=context.proxy_url,
             callback_logger=context.callback_logger,
             browser_mode=context.browser_mode,
+            interrupt_checker=context.interrupt_checker,
         )
 
 
@@ -129,6 +131,7 @@ class AccessTokenOnlyChatGPTRegistrationAdapter(BaseChatGPTRegistrationModeAdapt
             callback_logger=context.callback_logger,
             max_retries=context.max_retries,
             extra_config=context.extra_config,
+            interrupt_checker=context.interrupt_checker,
         )
 
 

@@ -57,6 +57,7 @@ class ChatGPTRegistrationModeAdapterTests(unittest.TestCase):
 
     def test_access_token_only_adapter_passes_runtime_context_to_engine(self):
         created = {}
+        interrupt_checker = lambda: None
 
         class FakeEngine:
             def __init__(self, **kwargs):
@@ -81,6 +82,7 @@ class ChatGPTRegistrationModeAdapterTests(unittest.TestCase):
             browser_mode="headed",
             max_retries=5,
             extra_config={"register_max_retries": 5},
+            interrupt_checker=interrupt_checker,
         )
 
         with mock.patch(
@@ -93,6 +95,7 @@ class ChatGPTRegistrationModeAdapterTests(unittest.TestCase):
         self.assertEqual(created["password"], "pw-demo")
         self.assertEqual(created["kwargs"]["browser_mode"], "headed")
         self.assertEqual(created["kwargs"]["max_retries"], 5)
+        self.assertIs(created["kwargs"]["interrupt_checker"], interrupt_checker)
 
 
 if __name__ == "__main__":

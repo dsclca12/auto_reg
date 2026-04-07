@@ -28,7 +28,6 @@ from .utils import (
     extract_flow_state,
     generate_datadog_trace,
     normalize_flow_url,
-    random_delay,
     seed_oai_device_cookie,
 )
 
@@ -76,7 +75,7 @@ class ChatGPTClient:
     BASE = "https://chatgpt.com"
     AUTH = "https://auth.openai.com"
 
-    def __init__(self, proxy=None, verbose=True, browser_mode="protocol"):
+    def __init__(self, proxy=None, verbose=True, browser_mode="protocol", interrupt_checker=None):
         """
         初始化 ChatGPT 客户端
 
@@ -88,6 +87,7 @@ class ChatGPTClient:
         self.proxy = proxy
         self.verbose = verbose
         self.browser_mode = browser_mode or "protocol"
+        self.interrupt_checker = interrupt_checker
         self.device_id = str(uuid.uuid4())
         self.accept_language = random.choice(
             [
@@ -132,7 +132,36 @@ class ChatGPTClient:
         seed_oai_device_cookie(self.session, self.device_id)
         self.last_registration_state = FlowState()
 
+    def _checkpoint(self):
+        checker = self.interrupt_checker
+        if callable(checker):
+            checker()
+
+    def _sleep_with_checkpoint(self, seconds: float):
+        remaining = max(float(seconds or 0), 0.0)
+        sleep_fn = time.sleep
+        while remaining > 0:
+            self._checkpoint()
+            chunk = min(0.25, remaining)
+            sleep_fn(chunk)
+            remaining -= chunk
+
+    def _session_get(self, url, **kwargs):
+        self._checkpoint()
+        session = self.session
+        response = session.get(url, **kwargs)
+        self._checkpoint()
+        return response
+
+    def _session_post(self, url, **kwargs):
+        self._checkpoint()
+        session = self.session
+        response = session.post(url, **kwargs)
+        self._checkpoint()
+        return response
+
     def _get_sentinel_token(self, flow: str, *, page_url: str | None = None):
+        self._checkpoint()
         prefer_browser = flow in {"username_password_create", "oauth_create_account"}
         if prefer_browser:
             # 服务器无 XServer，必须强制 headless
@@ -164,13 +193,14 @@ class ChatGPTClient:
 
     def _log(self, msg):
         """输出日志"""
+        self._checkpoint()
         if self.verbose:
             print(f"  {msg}")
 
     def _browser_pause(self, low=0.15, high=0.45):
         """在 headed 模式下加入轻微停顿，模拟有头浏览器节奏。"""
         if self.browser_mode == "headed":
-            random_delay(low, high)
+            self._sleep_with_checkpoint(random.uniform(low, high))
 
     def _headers(
         self,
@@ -313,7 +343,7 @@ class ChatGPTClient:
 
         try:
             self._browser_pause()
-            r = self.session.get(
+            r = self._session_get(
                 target_url,
                 headers=self._headers(
                     target_url,
@@ -362,7 +392,7 @@ class ChatGPTClient:
         """请求 ChatGPT Session 接口并返回原始会话数据。"""
         url = f"{self.BASE}/api/auth/session"
         self._browser_pause()
-        response = self.session.get(
+        response = self._session_get(
             url,
             headers=self._headers(
                 url,
@@ -461,7 +491,7 @@ class ChatGPTClient:
         url = f"{self.BASE}/"
         try:
             self._browser_pause()
-            r = self.session.get(
+            r = self._session_get(
                 url,
                 headers=self._headers(
                     url,
@@ -481,7 +511,7 @@ class ChatGPTClient:
         self._log("获取 CSRF token...")
         url = f"{self.BASE}/api/auth/csrf"
         try:
-            r = self.session.get(
+            r = self._session_get(
                 url,
                 headers=self._headers(
                     url,
@@ -529,7 +559,7 @@ class ChatGPTClient:
 
         try:
             self._browser_pause()
-            r = self.session.post(
+            r = self._session_post(
                 url,
                 params=params,
                 data=form_data,
@@ -569,12 +599,12 @@ class ChatGPTClient:
                     self._log(
                         f"访问 authorize URL... (尝试 {attempt + 1}/{max_retries})"
                     )
-                    time.sleep(1)  # 重试前等待
+                    self._sleep_with_checkpoint(1)  # 重试前等待
                 else:
                     self._log("访问 authorize URL...")
 
                 self._browser_pause()
-                r = self.session.get(
+                r = self._session_get(
                     url,
                     headers=self._headers(
                         url,
@@ -654,7 +684,7 @@ class ChatGPTClient:
 
         try:
             self._browser_pause()
-            r = self.session.post(url, json=payload, headers=headers, timeout=30)
+            r = self._session_post(url, json=payload, headers=headers, timeout=30)
 
             if r.status_code == 200:
                 data = r.json()
@@ -680,7 +710,7 @@ class ChatGPTClient:
 
         try:
             self._browser_pause()
-            r = self.session.get(
+            r = self._session_get(
                 url,
                 headers=self._headers(
                     url,
@@ -723,7 +753,7 @@ class ChatGPTClient:
 
         try:
             self._browser_pause()
-            r = self.session.post(url, json=payload, headers=headers, timeout=30)
+            r = self._session_post(url, json=payload, headers=headers, timeout=30)
 
             if r.status_code == 200:
                 try:
@@ -791,7 +821,7 @@ class ChatGPTClient:
 
         try:
             self._browser_pause()
-            r = self.session.post(url, json=payload, headers=headers, timeout=30)
+            r = self._session_post(url, json=payload, headers=headers, timeout=30)
 
             if r.status_code == 200:
                 try:

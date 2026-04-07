@@ -173,6 +173,7 @@ class ChatGPTPlatform(BasePlatform):
             browser_mode=browser_mode,
             max_retries=max_retries,
             extra_config=extra_config,
+            interrupt_checker=self.build_interrupt_checker(),
         )
         result = adapter.run(context)
         if not result or not result.success:

@@ -3,6 +3,7 @@ import json
 import unittest
 from unittest import mock
 
+from core.task_runtime import StopTaskRequested
 from platforms.chatgpt.refresh_token_registration_engine import (
     RefreshTokenRegistrationEngine,
     SignupFormResult,
@@ -234,6 +235,17 @@ class RegistrationEngineFlowTests(unittest.TestCase):
         create_account.assert_not_called()
         restart_login.assert_not_called()
         complete_exchange.assert_called_once()
+
+    def test_run_propagates_stop_request_via_interrupt_checker(self):
+        engine = RefreshTokenRegistrationEngine(
+            email_service=DummyEmailService(),
+            proxy_url="http://127.0.0.1:7890",
+            callback_logger=lambda msg: None,
+            interrupt_checker=lambda: (_ for _ in ()).throw(StopTaskRequested()),
+        )
+
+        with self.assertRaises(StopTaskRequested):
+            engine.run()
 
     @mock.patch(
         "platforms.chatgpt.refresh_token_registration_engine.build_sentinel_token",
